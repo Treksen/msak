@@ -1,0 +1,47 @@
+{
+  "title": "Leadership and Verification Policy",
+  "version": "2.0",
+  "lastUpdated": "2026-11-19",
+  "description": "How leadership requests are verified and what each leadership level may do in the portal.",
+  "sections": [
+    {
+      "heading": "1. Leadership Requests",
+      "paragraphs": [
+        "A member may declare a leadership position at registration or later from their profile. A declaration is a request for verification and grants no portal privilege until it is approved."
+      ]
+    },
+    {
+      "heading": "2. Who Verifies Whom",
+      "bullets": [
+        "National and regional leaders are verified by an MSAK administrator.",
+        "Institutional leaders are verified by an approved regional leader of the same association, or by an administrator."
+      ],
+      "paragraphs": [
+        "The reviewer may confirm the position with appropriate contacts before deciding. Every decision is recorded with the reviewer and date."
+      ]
+    },
+    {
+      "heading": "3. What Approved Leaders May Do",
+      "bullets": [
+        "Post announcements to their audience (institution, association or nation), published immediately.",
+        "Add and update local churches on the church map within their scope.",
+        "Review church suggestions submitted by members.",
+        "Regional leaders: verify institutional leaders and view members in their association."
+      ]
+    },
+    {
+      "heading": "4. Responsibilities",
+      "bullets": [
+        "Publish accurate, relevant and respectful information.",
+        "Map churches only after confirming the location and contacts on the ground.",
+        "Notify an MSAK administrator when your leadership position ends or changes."
+      ]
+    },
+    {
+      "heading": "5. Review of Roles",
+      "paragraphs": [
+        "Administrators, and regional leaders for institutional roles in their association, may revoke a role that is no longer verified."
+      ]
+    }
+  ]
+}

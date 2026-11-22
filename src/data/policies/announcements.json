@@ -1,0 +1,48 @@
+{
+  "title": "Announcements Policy",
+  "version": "2.0",
+  "lastUpdated": "2026-11-19",
+  "description": "Who may post announcements on the MSAK portal, who sees them, and the standards they must meet.",
+  "sections": [
+    {
+      "heading": "1. Purpose and Audience",
+      "paragraphs": [
+        "Portal announcements share official MSAK information with members. Every notice is addressed to one of three audiences: one institution (campus), one association (region), or the whole national membership. Members see the notices addressed to their own institution, their own association and the nation."
+      ]
+    },
+    {
+      "heading": "2. Who May Post",
+      "paragraphs": [
+        "Only verified leaders may post. The portal decides the audience from the leader's approved role; a leader cannot post to an audience outside it."
+      ],
+      "bullets": [
+        "Institutional leaders post to members of their own institution.",
+        "Regional leaders post to members of their own association.",
+        "National leaders post to all members.",
+        "Administrators may post to any audience."
+      ]
+    },
+    {
+      "heading": "3. Publication",
+      "paragraphs": [
+        "Announcements from verified leaders are published immediately. Leaders are responsible for checking that details such as dates, venues and contacts are accurate before posting."
+      ]
+    },
+    {
+      "heading": "4. Content Standards",
+      "paragraphs": ["Announcements must be clear, relevant and suitable for the intended audience. Do not post:"],
+      "bullets": [
+        "False, deceptive or unlawfully harmful content.",
+        "Harassment, discriminatory material or personal attacks.",
+        "Private contact or identifying information without permission.",
+        "Spam, unrelated promotions or content that violates the Community Standards."
+      ]
+    },
+    {
+      "heading": "5. Corrections and Removal",
+      "paragraphs": [
+        "Authors may remove their own announcements. Administrators may remove any announcement that no longer meets this policy. Contact an administrator if a notice contains an error."
+      ]
+    }
+  ]
+}

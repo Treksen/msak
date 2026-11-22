@@ -1,0 +1,46 @@
+{
+  "title": "Privacy Notice",
+  "version": "1.0",
+  "lastUpdated": "2026-11-17",
+  "description": "How the MSAK Student Portal handles information submitted by members.",
+  "sections": [
+    {
+      "heading": "1. Information We Collect",
+      "paragraphs": [
+        "When you register, the portal may collect your name, email address, gender, phone number, MSAK association, county, institution, course, year of study, admission year and any leadership details you choose to submit.",
+        "The portal also processes information needed to authenticate your account and record membership, leadership application and announcement activity."
+      ]
+    },
+    {
+      "heading": "2. How Information Is Used",
+      "paragraphs": [
+        "Information is used to create and maintain your account, connect you with the MSAK community, administer leadership reviews, deliver relevant announcements and protect the portal from misuse."
+      ]
+    },
+    {
+      "heading": "3. Access and Service Providers",
+      "paragraphs": [
+        "Your profile is available to you and authorised portal administrators. Information needed to review a leadership application may be viewed by authorised reviewers. Published announcements are visible to their intended audience.",
+        "The portal uses Supabase to provide authentication and database hosting, and Vercel or its configured hosting provider to serve the website. These providers process information to operate the service."
+      ]
+    },
+    {
+      "heading": "4. Retention and Account Requests",
+      "paragraphs": [
+        "Information is kept while needed to operate membership and portal functions, meet administrative needs and maintain appropriate records. To request correction or removal, contact the MSAK portal administrator. Some records may need to be retained for accountability or operational reasons."
+      ]
+    },
+    {
+      "heading": "5. Security",
+      "paragraphs": [
+        "The portal uses access controls and database policies intended to limit information to authorised users. No online service can guarantee absolute security. Keep your password private and report any suspected account compromise promptly."
+      ]
+    },
+    {
+      "heading": "6. Updates and Contact",
+      "paragraphs": [
+        "This notice may be revised when portal practices change. Check the version and last-updated date above. Questions or privacy requests can be directed to the MSAK leadership or the administrator responsible for the portal."
+      ]
+    }
+  ]
+}

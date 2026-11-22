@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Covenant design tokens — navy & gold, Fraunces headings, Inter body.
+   Use them as Tailwind classes: bg-navy-900, text-gold-700, font-serif, …
+--------------------------------------------------------------------------- */
+@theme {
+  --color-navy-950: #071536;
+  --color-navy-900: #0b1f4d;
+  --color-navy-800: #16306e;
+  --color-navy-700: #24407f;
+  --color-navy-500: #5b6e9e;
+  --color-navy-300: #a9b4cf;
+  --color-navy-200: #c9d2e8;
+  --color-navy-100: #dde3f1;
+  --color-navy-50: #e3e8f5;
+
+  --color-gold-800: #6b4e14;
+  --color-gold-700: #8a6420;
+  --color-gold-500: #c9a04a;
+  --color-gold-300: #e3c27a;
+  --color-gold-100: #f3ebd8;
+  --color-gold-50: #fff6e2;
+
+  --color-ivory: #f8f6f0;
+  --color-paper: #fbfaf6;
+  --color-line: #e6e1d3;
+  --color-line-strong: #c9bfa6;
+  --color-ink: #141b2d;
+  --color-body: #3b4458;
+  --color-muted: #5a6378;
+  --color-danger: #b42318;
+  --color-success: #1f7a4d;
+
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-ivory);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-gold-500);
+    outline-offset: 2px;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+}
+
+@layer components {
+  .container-page {
+    width: 100%;
+    max-width: 1200px;
+    margin-inline: auto;
+    padding-inline: 20px;
+  }
+  @media (min-width: 640px) {
+    .container-page { padding-inline: 24px; }
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-gold-700);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 10px 18px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.2;
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 120ms, border-color 120ms, color 120ms, opacity 120ms;
+    white-space: nowrap;
+  }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-sm { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+  .btn-primary { background: var(--color-navy-900); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--color-navy-800); }
+  .btn-gold { background: var(--color-gold-500); color: var(--color-navy-900); }
+  .btn-gold:hover:not(:disabled) { background: var(--color-gold-300); }
+  .btn-outline { background: #fff; color: var(--color-navy-900); border-color: var(--color-line-strong); }
+  .btn-outline:hover:not(:disabled) { border-color: var(--color-navy-900); }
+  .btn-ghost { background: transparent; color: var(--color-navy-900); }
+  .btn-ghost:hover:not(:disabled) { background: var(--color-gold-100); }
+  .btn-danger { background: #fff; color: var(--color-danger); border-color: #f0c7c2; }
+  .btn-danger:hover:not(:disabled) { border-color: var(--color-danger); }
+  .btn-on-dark { background: transparent; color: #fff; border-color: var(--color-navy-500); }
+  .btn-on-dark:hover:not(:disabled) { border-color: #fff; }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-ink);
+    margin-bottom: 6px;
+  }
+  .field-hint { font-size: 13px; color: var(--color-muted); margin-top: 6px; }
+  .field-error { font-size: 13px; color: var(--color-danger); margin-top: 6px; }
+  .input {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 14px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--color-ink);
+    font: inherit;
+    font-size: 16px; /* 16px stops iOS zooming into fields */
+  }
+  .input:focus { outline: none; border-color: var(--color-navy-900); box-shadow: 0 0 0 3px rgba(201, 160, 74, 0.35); }
+  .input[aria-invalid="true"] { border-color: var(--color-danger); }
+  textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge-campus { background: var(--color-gold-100); color: var(--color-gold-800); }
+  .badge-region { background: var(--color-navy-50); color: var(--color-navy-800); }
+  .badge-national { background: var(--color-navy-900); color: var(--color-gold-300); }
+  .badge-pending { background: var(--color-gold-50); color: var(--color-gold-800); border: 1px solid #ebd9ae; }
+  .badge-ok { background: #e3f3ea; color: var(--color-success); }
+  .badge-muted { background: #f1eee5; color: var(--color-muted); }
+
+  .prose-msak p { margin: 0 0 1em; line-height: 1.7; color: var(--color-body); }
+  .prose-msak ul { margin: 0 0 1em; padding-left: 1.25em; list-style: disc; color: var(--color-body); line-height: 1.7; }
+}
+
+/* Leaflet tweaks so the map matches the design */
+.leaflet-container { font-family: var(--font-sans); background: #eef0f5; }
+.leaflet-control-attribution { font-size: 10px; }
+.msak-pin { background: none; border: none; }
+.msak-pin svg { filter: drop-shadow(0 2px 3px rgba(7, 21, 54, 0.35)); }
+.msak-me { width: 18px; height: 18px; border-radius: 50%; background: #2f6bff; border: 3px solid #fff; box-shadow: 0 0 0 8px rgba(47, 107, 255, 0.2); }
+
+/* Respect the phone's safe areas when installed as an app */
+.pb-safe { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+/* Keep Leaflet's internal z-indexes inside the map so headers and dialogs stay on top */
+.leaflet-container { isolation: isolate; }

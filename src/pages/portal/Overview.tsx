@@ -1,0 +1,184 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { ArrowRight, BadgeCheck, Crosshair, MapPin, Megaphone } from "lucide-react";
+import { api } from "../../lib/api";
+import { useMe } from "../../lib/auth";
+import { usePortal } from "../../lib/portal";
+import { distanceKm, formatKm, getCurrentPosition } from "../../lib/geo";
+import { levelLabel } from "../../lib/format";
+import type { Announcement, Church, LeaderRoleWithPerson } from "../../lib/types";
+import { AnnouncementItem } from "../../components/Announcements";
+import { InstallPrompt } from "../../components/InstallPrompt";
+import { Alert, EmptyState, StatusBadge } from "../../components/ui";
+
+export function OverviewPage() {
+  const me = useMe();
+  const { lookup, perms } = usePortal();
+  const [feed, setFeed] = useState<Announcement[] | null>(null);
+  const [requests, setRequests] = useState<LeaderRoleWithPerson[]>([]);
+  const [churches, setChurches] = useState<Church[]>([]);
+  const [nearest, setNearest] = useState<{ c: Church; d: number } | null>(null);
+  const [locError, setLocError] = useState<string | null>(null);
+
+  const profile = me.profile;
+  const assoc = lookup.associationOfInstitution(profile?.institution_id);
+  const approved = me.roles.filter((r) => r.status === "approved");
+  const pendingMine = me.roles.filter((r) => r.status === "pending");
+
+  useEffect(() => {
+    document.title = "Overview — MSAK";
+    api.listAnnouncements().then(setFeed).catch(() => setFeed([]));
+    api.listChurches().then(setChurches).catch(() => setChurches([]));
+    if (perms.canReviewLeaders) api.listLeaderRoles().then(setRequests).catch(() => setRequests([]));
+  }, [perms.canReviewLeaders]);
+
+  async function findNearest() {
+    setLocError(null);
+    try {
+      const p = await getCurrentPosition();
+      const published = churches.filter((c) => c.status === "published");
+      const best = published.map((c) => ({ c, d: distanceKm(p, c) })).sort((a, b) => a.d - b.d)[0];
+      setNearest(best ?? null);
+    } catch (e) {
+      setLocError(e instanceof Error ? e.message : "Couldn't get your location.");
+    }
+  }
+
+  const pendingRequests = requests.filter((r) => r.status === "pending");
+  const myScopeChurches = churches.filter((c) => c.association_id === assoc?.id);
+  const suggestions = churches.filter((c) => c.status === "suggested" && perms.canManageChurchesIn(c.association_id));
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-sm text-muted">Shalom,</p>
+          <h1 className="font-serif text-3xl font-semibold text-navy-900 sm:text-4xl">{profile?.full_name ?? me.email}</h1>
+        </div>
+        {perms.canPost && (
+          <Link to="/app/announcements?compose=1" className="btn btn-primary">
+            <Megaphone className="size-[18px]" aria-hidden="true" />
+            Post announcement
+          </Link>
+        )}
+      </div>
+
+      {!profile && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-6">
+          {perms.canReviewLeaders && pendingRequests.length > 0 && (
+            <section aria-labelledby="req-h" className="card overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+                <div>
+                  <h2 id="req-h" className="font-serif text-xl font-semibold text-navy-900">
+                    Leader requests waiting for you
+                  </h2>
+                  <p className="text-[13px] text-muted">
+                    {perms.isAdmin ? "You review national and regional leaders (and campus leaders anywhere)." : `You verify campus leaders in ${assoc?.code}.`}
+                  </p>
+                </div>
+                <Link to="/app/leaders" className="btn btn-outline btn-sm">
+                  Review {pendingRequests.length}
+                </Link>
+              </div>
+              <ul>
+                {pendingRequests.slice(0, 3).map((r) => (
+                  <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[#efebe0] px-5 py-3 last:border-b-0">
+                    <span>
+                      <span className="block font-semibold text-navy-900">{r.person?.full_name ?? "Member"}</span>
+                      <span className="block text-[13px] text-muted">
+                        {levelLabel[r.level]} · {r.position} · {lookup.placeLabel(r.person?.institution_id)}
+                      </span>
+                    </span>
+                    <StatusBadge status={r.status} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section aria-labelledby="feed-h" className="card overflow-hidden">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <h2 id="feed-h" className="font-serif text-xl font-semibold text-navy-900">
+                Latest announcements
+              </h2>
+              <Link to="/app/announcements" className="text-sm font-semibold">
+                See all
+              </Link>
+            </div>
+            {feed === null ? (
+              <p className="px-5 py-6 text-sm text-muted">Loading…</p>
+            ) : feed.length === 0 ? (
+              <div className="p-5">
+                <EmptyState title="Nothing yet">Announcements from your campus, region and the national office will appear here.</EmptyState>
+              </div>
+            ) : (
+              feed.slice(0, 4).map((a) => <AnnouncementItem key={a.id} a={a} lookup={lookup} canDelete={false} compact />)
+            )}
+          </section>
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <section aria-label="Membership" className="flex flex-col gap-3 rounded-lg border-t-[3px] border-gold-500 bg-navy-900 p-5 text-white">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold-300">Member · {assoc?.code}</span>
+              {(me.isAdmin || approved.length > 0) && (
+                <span className="rounded-full bg-navy-700 px-2.5 py-1 text-xs font-semibold">
+                  {me.isAdmin ? "Administrator" : approved.map((r) => `${levelLabel[r.level]} leader`).join(" · ")}
+                </span>
+              )}
+            </div>
+            <span className="text-[17px] font-semibold leading-snug">{lookup.institution(profile?.institution_id)?.name}</span>
+            <span className="text-[13px] text-navy-300">
+              {lookup.countyOfInstitution(profile?.institution_id)?.name} County · Year {profile?.year_of_study} · Completing{" "}
+              {profile?.expected_completion_year}
+            </span>
+            {pendingMine.length > 0 && (
+              <span className="flex items-center gap-2 rounded-md bg-navy-800 px-3 py-2 text-[13px] text-navy-100">
+                <BadgeCheck className="size-4 text-gold-300" aria-hidden="true" />
+                {pendingMine.map((r) => `${levelLabel[r.level]} ${r.position}`).join(", ")} — awaiting verification
+              </span>
+            )}
+          </section>
+
+          <section aria-labelledby="near-h" className="card flex flex-col gap-3 p-5">
+            <h2 id="near-h" className="font-serif text-xl font-semibold text-navy-900">
+              Nearest church
+            </h2>
+            {nearest ? (
+              <Link to="/app/churches" className="flex items-center gap-3 rounded-md border-2 border-gold-500 p-3 no-underline">
+                <MapPin className="size-5 text-gold-700" aria-hidden="true" />
+                <span className="flex-1">
+                  <span className="block font-bold text-navy-900">{nearest.c.name}</span>
+                  <span className="block text-[13px] text-muted">{nearest.c.fellowship}</span>
+                </span>
+                <span className="text-sm font-bold text-gold-700">{formatKm(nearest.d)}</span>
+              </Link>
+            ) : (
+              <button type="button" className="btn btn-outline" onClick={findNearest}>
+                <Crosshair className="size-[18px]" aria-hidden="true" />
+                Use my location
+              </button>
+            )}
+            {locError && <p className="text-[13px] text-danger">{locError}</p>}
+            <p className="text-[13px] text-muted">
+              {myScopeChurches.filter((c) => c.status === "published").length} churches mapped in {assoc?.code ?? "your association"}.{" "}
+              <Link to="/app/churches">Open the map</Link>
+            </p>
+            {suggestions.length > 0 && (
+              <Link to="/app/churches" className="flex items-center justify-between rounded-md border border-dashed border-line-strong p-3 text-sm no-underline">
+                <span>
+                  <strong>{suggestions.length}</strong> church suggestion{suggestions.length > 1 ? "s" : ""} to confirm
+                </span>
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
+            )}
+          </section>
+
+          <InstallPrompt />
+        </div>
+      </div>
+    </div>
+  );
+}

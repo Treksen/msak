@@ -1,0 +1,44 @@
+{
+  "title": "Community Standards",
+  "version": "1.0",
+  "lastUpdated": "2026-11-17",
+  "description": "Shared expectations for a respectful, faith-centred student community.",
+  "sections": [
+    {
+      "heading": "1. Our Shared Community",
+      "paragraphs": [
+        "MSAK brings students together for fellowship, learning, service and mutual encouragement. Members are expected to contribute to a welcoming environment across institutions and regions."
+      ]
+    },
+    {
+      "heading": "2. Respectful Conduct",
+      "paragraphs": ["Treat members, leaders and institutions with respect."],
+      "bullets": [
+        "Do not harass, threaten, bully or discriminate against another person.",
+        "Discuss disagreements constructively and avoid personal attacks.",
+        "Respect the privacy, dignity and boundaries of other members."
+      ]
+    },
+    {
+      "heading": "3. Responsible Communication",
+      "paragraphs": ["Use community spaces and announcements for relevant, truthful and constructive information."],
+      "bullets": [
+        "Do not post spam, fraudulent offers, malicious links or knowingly false claims.",
+        "Do not share another person's personal information without permission.",
+        "Keep announcements appropriate to their regional or national audience."
+      ]
+    },
+    {
+      "heading": "4. Reporting a Concern",
+      "paragraphs": [
+        "Report serious or repeated conduct concerns to an MSAK leader or portal administrator. Include enough detail for the concern to be understood, and avoid circulating private allegations in public channels."
+      ]
+    },
+    {
+      "heading": "5. Review and Response",
+      "paragraphs": [
+        "MSAK may review reported conduct and take proportionate steps to protect members and the community, including removing content or limiting portal access. Where appropriate, the person concerned may be asked to provide a response."
+      ]
+    }
+  ]
+}
