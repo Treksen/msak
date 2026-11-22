@@ -1,7 +1,7 @@
 {
   "name": "msak-portal",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "MSAK — Messianic Students Association of Kenya. Public site, church map and member portal (PWA).",
   "scripts": {
