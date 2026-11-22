@@ -16,10 +16,47 @@ const nav = [
   { to: "/policies", label: "Policies" },
 ];
 
-function isActive(to: string, pathname: string, hash: string) {
-  if (to === "/") return pathname === "/" && !hash;
-  if (to.startsWith("/#")) return pathname === "/" && hash === to.slice(1);
+/** Home-page sections the navbar follows while scrolling ("join" has no link, so nothing is highlighted there). */
+const SECTIONS = ["about", "associations", "story", "join"];
+
+/** On the home page the highlight follows the section in view; elsewhere it follows the page. */
+function isActive(to: string, pathname: string, section: string) {
+  if (to === "/") return pathname === "/" && section === "";
+  if (to.startsWith("/#")) return pathname === "/" && section === to.slice(2);
   return pathname === to || pathname.startsWith(`${to}/`);
+}
+
+/** Which home section is under the navbar right now ("" = the top of the page). */
+function useSectionInView(enabled: boolean, initial: string) {
+  const [section, setSection] = useState(initial);
+  useEffect(() => {
+    if (!enabled) return;
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // a section counts once its top passes a line about a third of the way down the screen
+        const line = 110 + window.innerHeight * 0.25;
+        let current = "";
+        for (const id of SECTIONS) {
+          const el = document.getElementById(id);
+          if (el && el.getBoundingClientRect().top <= line) current = id;
+        }
+        // at the very bottom, the last section is the one being read
+        if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) current = SECTIONS[SECTIONS.length - 1];
+        setSection(current);
+      });
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [enabled]);
+  return section;
 }
 
 /**
@@ -35,6 +72,15 @@ export function PublicLayout() {
   const [scrolled, setScrolled] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const isHome = pathname === "/";
+  const section = useSectionInView(isHome, hash.slice(1));
+
+  /** Clicking a home link you're already "on" (e.g. Home after scrolling down) still scrolls there. */
+  const jump = (to: string) => {
+    if (!isHome || !(to === "/" || to.startsWith("/#"))) return;
+    const id = to.split("#")[1];
+    if (!id) window.scrollTo({ top: 0, behavior: "smooth" });
+    else document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => setOpen(false), [pathname, hash]);
 
@@ -91,11 +137,12 @@ export function PublicLayout() {
 
           <nav aria-label="Main" className="hidden items-center gap-0.5 xl:flex">
             {nav.map((n) => {
-              const active = isActive(n.to, pathname, hash);
+              const active = isActive(n.to, pathname, section);
               return (
                 <Link
                   key={n.to}
                   to={n.to}
+                  onClick={() => jump(n.to)}
                   aria-current={active ? "page" : undefined}
                   className={`whitespace-nowrap rounded-full px-4 py-2.5 text-[15px] no-underline transition-colors ${
                     active ? "bg-ivory font-bold text-navy-900" : "font-medium text-white hover:bg-white/10"
@@ -157,11 +204,12 @@ export function PublicLayout() {
             <nav aria-label="Main" className="flex-1 overflow-y-auto px-3.5 pt-3">
               <ul className="flex flex-col gap-1">
                 {nav.map((n) => {
-                  const active = isActive(n.to, pathname, hash);
+                  const active = isActive(n.to, pathname, section);
                   return (
                     <li key={n.to}>
                       <Link
                         to={n.to}
+                        onClick={() => jump(n.to)}
                         aria-current={active ? "page" : undefined}
                         className={`block rounded-full px-5 py-3 font-serif text-2xl no-underline ${
                           active ? "bg-ivory font-semibold text-navy-900" : "font-medium text-white hover:bg-white/10"
