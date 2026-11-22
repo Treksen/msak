@@ -37,6 +37,7 @@ With no Supabase keys the app runs in **demo mode**: sample data lives in your b
 2. **SQL Editor → New query**, run these files from `supabase/` **in order**:
    1. `01_schema.sql` — tables, security rules, functions, storage bucket
    2. `02_seed.sql` — 8 associations, 30 counties, 272 institutions and the 15 imported NAMSA churches
+   (then `03_admin_bootstrap.sql` in step 7 below)
 3. **Project Settings → API**: copy the Project URL and the `anon` / publishable key.
 4. `cp .env.example .env.local` and fill in:
    ```
@@ -47,9 +48,17 @@ With no Supabase keys the app runs in **demo mode**: sample data lives in your b
 5. **Authentication → URL Configuration**
    - Site URL: your production URL (e.g. `https://msak.vercel.app`)
    - Redirect URLs: add `http://localhost:5173/**` and `https://YOUR-DOMAIN/**`
-6. Restart `npm run dev`, register an account and confirm the email.
-7. Make yourself the first administrator: edit the email in `supabase/03_admin_bootstrap.sql`, run it in SQL Editor.
-   From then on, admins promote other admins from **Members**.
+6. Restart `npm run dev`.
+7. **Create your administrator account** (admins are not students and never register through the app):
+   - **Authentication → Users → Add user → Create new user**: your email + a strong password, tick **Auto Confirm User**.
+   - Edit the email in `supabase/03_admin_bootstrap.sql` and run it in SQL Editor.
+   - Log in to the portal with that email and password.
+   You're **invisible to members**: you appear in no member or leader list, your announcements are signed
+   "MSAK National Office" and churches you add are credited to "MSAK". Add more admins the same way, or promote a
+   registered member from **Members**.
+
+> Already ran an older `01_schema.sql` (before 22 Nov 2026)? Run `supabase/04_admin_accounts_migration.sql` once
+> to get admin accounts without a profile. A fresh setup doesn't need it.
 
 > Email: Supabase's built-in mailer is rate-limited (a few emails per hour). Before launch, add an SMTP provider
 > (e.g. Resend, Brevo) under **Authentication → Emails → SMTP Settings**, and customise the confirmation and

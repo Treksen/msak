@@ -81,7 +81,9 @@ export function Composer({
   const roleFor = (aud: Audience) => me.roles.find((r) => r.status === "approved" && r.level === aud);
   const [audience, setAudience] = useState<Audience>(audiences[0]);
   const [assocId, setAssocId] = useState<number>(lookup.associationOfInstitution(me.profile?.institution_id)?.id ?? lookup.associations[0]?.id ?? 1);
-  const [instId, setInstId] = useState<number>(me.profile?.institution_id ?? 0);
+  const [instId, setInstId] = useState<number>(
+    me.profile?.institution_id ?? lookup.institutionsInAssociation(lookup.associations[0]?.id)[0]?.id ?? 0,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);

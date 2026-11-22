@@ -21,7 +21,7 @@ export function ProfilePage() {
     document.title = "My profile — MSAK";
   }, []);
 
-  if (!p) return <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>;
+  if (!p) return me.isAdmin ? <AdminAccount /> : <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>;
   const movingCampus = instId !== p.institution_id;
   const hasCampusRole = me.roles.some((r) => r.level === "institutional" && ["pending", "approved"].includes(r.status));
 
@@ -238,5 +238,68 @@ function LeadershipSection() {
       )}
       {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
     </section>
+  );
+}
+
+/** Account page for an administrator who has no member profile (not a student). */
+function AdminAccount() {
+  const me = useMe();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  async function changePassword(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const f = new FormData(form);
+    const pw = String(f.get("password") ?? "");
+    if (pw.length < 8) return setMsg({ tone: "error", text: "Use at least 8 characters." });
+    if (pw !== String(f.get("confirm") ?? "")) return setMsg({ tone: "error", text: "The two passwords don't match." });
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.updatePassword(pw);
+      form.reset();
+      setMsg({ tone: "success", text: "Password changed." });
+    } catch (err) {
+      setMsg({ tone: "error", text: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-8">
+      <PageHeader eyebrow="Administrator" title="My account">
+        Your account is separate from the member register.
+      </PageHeader>
+      <section className="card flex flex-col gap-3 p-5 sm:p-6">
+        <h2 className="font-serif text-xl font-semibold text-navy-900">Sign-in</h2>
+        <TextInput label="Email" value={me.email ?? ""} disabled hint="Change it in Supabase → Authentication → Users." />
+      </section>
+      <section className="card flex flex-col gap-2 p-5 sm:p-6">
+        <h2 className="font-serif text-xl font-semibold text-navy-900">You're invisible to members</h2>
+        <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-body">
+          <li>You don't appear in any member or leader list, and no one can see who the administrators are.</li>
+          <li>Announcements you post are signed “MSAK National Office”.</li>
+          <li>Churches you add or edit are credited to “MSAK”.</li>
+          <li>You can see and manage everything: members, leaders, announcements, churches and documents.</li>
+        </ul>
+      </section>
+      <form onSubmit={changePassword} className="card grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
+        <h2 className="font-serif text-xl font-semibold text-navy-900 sm:col-span-2">Change password</h2>
+        <TextInput label="New password" name="password" type="password" autoComplete="new-password" minLength={8} required hint="At least 8 characters." />
+        <TextInput label="Confirm new password" name="confirm" type="password" autoComplete="new-password" required />
+        {msg && (
+          <div className="sm:col-span-2">
+            <Alert tone={msg.tone}>{msg.text}</Alert>
+          </div>
+        )}
+        <div className="flex justify-end sm:col-span-2">
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? "Saving…" : "Change password"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }

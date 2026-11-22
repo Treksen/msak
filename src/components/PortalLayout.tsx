@@ -53,7 +53,7 @@ export function PortalLayout() {
     { to: "/app/announcements", label: "Announcements", icon: Megaphone },
     { to: "/app/churches", label: "Churches", icon: MapPin },
     { to: "/app/documents", label: "Documents", icon: FileText },
-    { to: "/app/profile", label: "My profile", icon: User },
+    { to: "/app/profile", label: me.profile ? "My profile" : "My account", icon: User },
     { to: "/app/feedback", label: "Help & feedback", icon: MessageSquare },
   ];
   const leader: Item[] = [
@@ -63,7 +63,9 @@ export function PortalLayout() {
   ];
   const tabs: Item[] = [member[0], member[1], member[2], member[4]];
   const roleLine = me.isAdmin
-    ? "Administrator"
+    ? me.profile
+      ? "Administrator"
+      : me.email ?? "Administrator"
     : me.roles.find((r) => r.status === "approved")
       ? `${me.roles.find((r) => r.status === "approved")!.position} · ${myAssoc?.code ?? ""}`
       : `Member · ${myAssoc?.code ?? ""}`;
@@ -119,7 +121,7 @@ export function PortalLayout() {
           {initials(me.profile?.full_name ?? "M")}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-white">{me.profile?.full_name ?? me.email}</span>
+          <span className="block truncate text-sm font-semibold text-white">{me.profile?.full_name ?? (me.isAdmin ? "Administrator" : me.email)}</span>
           <span className="block truncate text-xs text-navy-300">{roleLine}</span>
         </span>
         <button type="button" onClick={logout} className="btn btn-sm text-navy-300 hover:text-white" aria-label="Log out">
@@ -167,7 +169,7 @@ export function PortalLayout() {
             {({ isActive }) => (
               <>
                 <t.icon className="size-[22px]" />
-                {t.label === "My profile" ? "Profile" : t.label === "Announcements" ? "Notices" : t.label}
+                {t.label === "My profile" ? "Profile" : t.label === "My account" ? "Account" : t.label === "Announcements" ? "Notices" : t.label}
                 <span className={`h-0.5 w-[18px] ${isActive ? "bg-gold-500" : "bg-transparent"}`} />
               </>
             )}

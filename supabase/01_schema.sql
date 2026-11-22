@@ -186,6 +186,13 @@ returns smallint language sql stable security definer set search_path = '' as $$
   select public.institution_association_id(public.my_institution_id());
 $$;
 
+-- Is the caller a registered member (has a member profile)?
+-- Admin/staff accounts have no profile: they are not members and are never listed anywhere.
+create or replace function public.is_member()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid());
+$$;
+
 -- Does the caller hold an approved role of this level (optionally in this scope)?
 create or replace function public.has_role(
   p_level text, p_association_id smallint default null, p_institution_id bigint default null
@@ -220,6 +227,7 @@ returns boolean language sql stable security definer set search_path = '' as $$
 $$;
 
 revoke all on function public.is_admin() from public;
+revoke all on function public.is_member() from public;
 revoke all on function public.my_institution_id() from public;
 revoke all on function public.my_association_id() from public;
 revoke all on function public.institution_association_id(bigint) from public;
@@ -227,6 +235,7 @@ revoke all on function public.has_role(text, smallint, bigint) from public;
 revoke all on function public.can_manage_churches(smallint) from public;
 revoke all on function public.can_view_member(bigint) from public;
 grant execute on function public.is_admin() to authenticated;
+grant execute on function public.is_member() to authenticated;
 grant execute on function public.my_institution_id() to authenticated;
 grant execute on function public.my_association_id() to authenticated;
 grant execute on function public.institution_association_id(bigint) to anon, authenticated;
@@ -286,7 +295,7 @@ begin
   end if;
   if tg_op = 'INSERT' then
     new.created_by := auth.uid();
-    new.created_by_name := (select p.full_name from public.profiles p where p.id = auth.uid());
+    new.created_by_name := coalesce((select p.full_name from public.profiles p where p.id = auth.uid()), 'MSAK');
     if not v_manager then
       new.status := 'suggested';
       new.location_verified := false;
@@ -348,13 +357,15 @@ create policy "Read leader roles in scope" on public.leader_roles for select to 
 -- Announcements: national to all members; regional to the association; institutional to the campus.
 create policy "Read announcements for my audience" on public.announcements for select to authenticated
   using (
-    audience = 'national'
-    or (audience = 'regional' and association_id = public.my_association_id())
-    or (audience = 'institutional' and institution_id = public.my_institution_id())
-    or author_id = (select auth.uid())
-    or public.is_admin()
-    or (audience <> 'national' and public.has_role('regional', association_id))
-    or public.has_role('national')
+    public.is_admin()
+    or (public.is_member() and (
+      audience = 'national'
+      or (audience = 'regional' and association_id = public.my_association_id())
+      or (audience = 'institutional' and institution_id = public.my_institution_id())
+      or author_id = (select auth.uid())
+      or (audience <> 'national' and public.has_role('regional', association_id))
+      or public.has_role('national')
+    ))
   );
 create policy "Authors and admins delete announcements" on public.announcements for delete to authenticated
   using (author_id = (select auth.uid()) or public.is_admin());
@@ -366,7 +377,7 @@ create policy "Managers and authors see suggestions" on public.churches for sele
   using (created_by = (select auth.uid()) or public.can_manage_churches(association_id));
 create policy "Members suggest, leaders publish" on public.churches for insert to authenticated
   with check (
-    status = 'suggested'
+    (status = 'suggested' and (public.is_member() or public.is_admin()))
     or (status = 'published' and public.can_manage_churches(association_id))
   );
 create policy "Leaders update churches in scope" on public.churches for update to authenticated
@@ -376,13 +387,14 @@ create policy "Leaders delete churches in scope" on public.churches for delete t
   using (public.can_manage_churches(association_id));
 
 -- Documents: members read; admins manage.
-create policy "Members read documents" on public.documents for select to authenticated using (true);
+create policy "Members read documents" on public.documents for select to authenticated
+  using (public.is_member() or public.is_admin());
 create policy "Admins manage documents" on public.documents for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
 -- Feedback: write your own; read your own; admins read all.
 create policy "Members send feedback" on public.feedback for insert to authenticated
-  with check (user_id = (select auth.uid()));
+  with check (user_id = (select auth.uid()) and (public.is_member() or public.is_admin()));
 create policy "Read own feedback; admins read all" on public.feedback for select to authenticated
   using (user_id = (select auth.uid()) or public.is_admin());
 
@@ -563,13 +575,17 @@ begin
 
   select p.full_name into v_name from public.profiles p where p.id = v_uid;
   select a.code into v_code from public.associations a where a.id = v_assoc;
-  v_title := case
-    when v_role.id is not null then initcap(p_audience) || ' leader · ' || v_role.position
-      || coalesce(' · ' || v_code, '')
-    else 'MSAK administrator' end;
+  -- Leaders sign with their name and role. Administrators are never named to members.
+  if v_role.id is not null then
+    v_title := initcap(p_audience) || ' leader · ' || v_role.position || coalesce(' · ' || v_code, '');
+    v_name := coalesce(v_name, 'MSAK');
+  else
+    v_title := 'MSAK National Office';
+    v_name := 'MSAK';
+  end if;
 
   insert into public.announcements (author_id, author_name, author_title, audience, association_id, institution_id, title, body)
-  values (v_uid, coalesce(v_name, 'MSAK'), v_title, p_audience, v_assoc, v_inst, btrim(p_title), btrim(p_body))
+  values (v_uid, v_name, v_title, p_audience, v_assoc, v_inst, btrim(p_title), btrim(p_body))
   returning id into v_id;
   return v_id;
 end;
@@ -628,6 +644,12 @@ declare
   v_position text := nullif(btrim(coalesce(m ->> 'leader_position', '')), '');
   v_assoc smallint;
 begin
+  -- Accounts created without member details (e.g. an administrator added in the Supabase
+  -- dashboard) get no profile: they are not members, see nothing until made admin, and are
+  -- never listed to anyone.
+  if v_inst is null then
+    return new;
+  end if;
   if not exists (select 1 from public.institutions where id = v_inst) then
     raise exception 'Choose a valid institution.' using errcode = '22023';
   end if;
@@ -679,7 +701,7 @@ values ('documents', 'documents', false, 20971520,
 on conflict (id) do nothing;
 
 create policy "Members download documents" on storage.objects for select to authenticated
-  using (bucket_id = 'documents');
+  using (bucket_id = 'documents' and (public.is_member() or public.is_admin()));
 create policy "Admins upload documents" on storage.objects for insert to authenticated
   with check (bucket_id = 'documents' and public.is_admin());
 create policy "Admins delete documents" on storage.objects for delete to authenticated

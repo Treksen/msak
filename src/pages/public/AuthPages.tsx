@@ -31,7 +31,7 @@ const personas: { id: DemoPersona; label: string; note: string }[] = [
   { id: "institutional", label: "Institutional leader", note: "Posts to JKUAT" },
   { id: "regional", label: "Regional leader", note: "NAMSA · approves campus leaders" },
   { id: "national", label: "National leader", note: "Posts to all members" },
-  { id: "admin", label: "Administrator", note: "Everything" },
+  { id: "admin", label: "Administrator", note: "Everything · invisible to members" },
 ];
 
 export function LoginPage() {

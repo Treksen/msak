@@ -19,7 +19,7 @@ import churchSeed from "../data/churches.seed.json";
  * so you can preview every role before connecting Supabase.
  */
 
-const KEY = "msak-demo-v1";
+const KEY = "msak-demo-v2";
 const directory = directoryJson as Directory;
 
 type DemoUser = { id: string; email: string; password: string };
@@ -109,7 +109,6 @@ function seed(): State {
     person("demo-institutional", "Ivy Wanjiku", "Female", jkuat, 2),
     person("demo-regional", "Rafael Otieno", "Male", ku, 4),
     person("demo-national", "Wanjiru Achieng", "Female", westInst, 3),
-    person("demo-admin", "Ada Njeri", "Female", jkuat, 4),
     person("demo-applicant-1", "Kevin Kiprono", "Male", ku, 2),
     person("demo-applicant-2", "Grace Muthoni", "Female", nyeriInst, 3),
   ];
@@ -134,7 +133,7 @@ function seed(): State {
       body: "Register through the portal before the deadline. Details are in Documents.", created_at: ago(26),
     },
     {
-      id: newId(), author_id: "demo-admin", author_name: "Ada Njeri", author_title: "MSAK administrator",
+      id: newId(), author_id: "demo-admin", author_name: "MSAK", author_title: "MSAK National Office",
       audience: "national", association_id: null, institution_id: null, title: "Welcome to the new MSAK portal",
       body: "Announcements from your campus, your association and the national office now arrive in one place. Add the portal to your home screen to open it like an app.",
       created_at: ago(72),
@@ -421,6 +420,7 @@ export function createDemoApi(): Api {
     async listAnnouncements() {
       const u = me();
       const p = profileOf(u);
+      if (!p && !isAdmin(u)) return [];
       const myInst = p?.institution_id ?? null;
       const myAssoc = assocOf(myInst);
       return s.announcements
@@ -460,10 +460,11 @@ export function createDemoApi(): Api {
       s.announcements.push({
         id: newId(),
         author_id: u,
-        author_name: profileOf(u)?.full_name ?? "MSAK",
+        // Leaders sign with their name; administrators are never named to members.
+        author_name: role ? profileOf(u)?.full_name ?? "MSAK" : "MSAK",
         author_title: role
           ? `${input.audience[0].toUpperCase()}${input.audience.slice(1)} leader · ${role.position}${code ? ` · ${code}` : ""}`
-          : "MSAK administrator",
+          : "MSAK National Office",
         audience: input.audience,
         association_id: assoc,
         institution_id: inst,
@@ -510,7 +511,7 @@ export function createDemoApi(): Api {
           status: manager ? input.status : "suggested",
           location_verified: manager ? input.location_verified : false,
           created_by: u,
-          created_by_name: profileOf(u)?.full_name ?? null,
+          created_by_name: profileOf(u)?.full_name ?? "MSAK",
           verified_at: manager && input.status === "published" ? now() : null,
           created_at: now(),
           updated_at: now(),

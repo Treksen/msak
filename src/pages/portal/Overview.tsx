@@ -53,7 +53,7 @@ export function OverviewPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-muted">Shalom,</p>
-          <h1 className="font-serif text-3xl font-semibold text-navy-900 sm:text-4xl">{profile?.full_name ?? me.email}</h1>
+          <h1 className="font-serif text-3xl font-semibold text-navy-900 sm:text-4xl">{profile?.full_name ?? (me.isAdmin ? "Administrator" : me.email)}</h1>
         </div>
         {perms.canPost && (
           <Link to="/app/announcements?compose=1" className="btn btn-primary">
@@ -63,7 +63,7 @@ export function OverviewPage() {
         )}
       </div>
 
-      {!profile && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
+      {!profile && !me.isAdmin && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-6">
@@ -120,6 +120,18 @@ export function OverviewPage() {
         </div>
 
         <div className="flex flex-col gap-6">
+          {!profile && me.isAdmin ? (
+            <section aria-label="Administrator account" className="flex flex-col gap-3 rounded-lg border-t-[3px] border-gold-500 bg-navy-900 p-5 text-white">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold-300">Administrator · full access</span>
+              <span className="text-[17px] font-semibold leading-snug">{me.email}</span>
+              <span className="text-[13px] leading-relaxed text-navy-300">
+                You're invisible to members: you don't appear in any member list, and your announcements show as “MSAK National Office”.
+              </span>
+              <Link to="/app/admin" className="btn btn-gold btn-sm self-start rounded-full">
+                Open administration
+              </Link>
+            </section>
+          ) : (
           <section aria-label="Membership" className="flex flex-col gap-3 rounded-lg border-t-[3px] border-gold-500 bg-navy-900 p-5 text-white">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold-300">Member · {assoc?.code}</span>
@@ -141,6 +153,7 @@ export function OverviewPage() {
               </span>
             )}
           </section>
+          )}
 
           <section aria-labelledby="near-h" className="card flex flex-col gap-3 p-5">
             <h2 id="near-h" className="font-serif text-xl font-semibold text-navy-900">
