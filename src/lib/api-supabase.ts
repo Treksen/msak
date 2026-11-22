@@ -12,8 +12,8 @@ import type {
   Stats,
 } from "./types";
 
-/** Throw Supabase errors so screens can show them. */
-function check<T>(res: { data: T; error: { message: string } | null }): T {
+/** Throw Supabase errors so screens can show them; otherwise return the data. */
+function check<R extends { data: unknown; error: { message: string } | null }>(res: R): R["data"] {
   if (res.error) throw new Error(res.error.message);
   return res.data;
 }
