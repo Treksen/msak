@@ -4,10 +4,13 @@ import { MapPin } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { makeLookup } from "../../lib/directory";
-import type { Church, Stats } from "../../lib/types";
+import type { Church, HomeBanner, Stats } from "../../lib/types";
 import { InstallPrompt } from "../../components/InstallPrompt";
-import { ChurchMap } from "../../components/ChurchMap";
 import { StoryJourney } from "../../components/StoryJourney";
+import { HomeBannerStrip } from "../../components/HomeBanner";
+import { Photo } from "../../components/Photo";
+import { LazyChurchMap } from "../../components/LazyChurchMap";
+import { useSeo } from "../../lib/seo";
 
 export function HomePage() {
   const { directory } = useAuth();
@@ -15,10 +18,21 @@ export function HomePage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [churches, setChurches] = useState<Church[]>([]);
   const [assoc, setAssoc] = useState<number | "all">("all");
+  const [banner, setBanner] = useState<HomeBanner | null>(null);
+
+  useSeo({
+    title: "MSAK — Messianic Students Association of Kenya",
+    description:
+      "MSAK connects, disciples and equips Messianic students in universities and colleges across Kenya. Find your regional association, join as a member, and find a Sabbath-keeping church near your campus.",
+    path: "/",
+  });
 
   useEffect(() => {
-    document.title = "MSAK — Messianic Students Association of Kenya";
     api.getStats().then(setStats).catch(() => setStats(null));
+    api
+      .listLiveBanners()
+      .then((rows) => setBanner(rows[0] ?? null))
+      .catch(() => setBanner(null));
     api
       .listChurches()
       .then((rows) => setChurches(rows.filter((c) => c.status === "published")))
@@ -42,14 +56,19 @@ export function HomePage() {
     <>
       {/* Hero — the floating navbar sits on top of this photo */}
       <section className="relative flex min-h-[600px] flex-col overflow-hidden sm:min-h-[680px] lg:min-h-[720px]">
-        <img
-          src="/photos/photo-0058.jpg"
+        <Photo
+          src="/photos/photo-0058"
           alt="MSAK students gathered in song at a national rally"
           className="absolute inset-0 size-full object-cover object-[55%_40%]"
-          fetchPriority="high"
+          priority
         />
         <div aria-hidden="true" className="absolute inset-0 bg-navy-950/60" />
-        <div className="container-page relative flex flex-1 flex-col justify-end gap-5 pb-12 pt-28 text-white sm:gap-6 sm:pb-16 sm:pt-36 lg:pb-20">
+
+        <div
+          className={`container-page relative flex flex-1 flex-col justify-end gap-5 pt-28 text-white sm:gap-6 sm:pt-36 ${
+            banner ? "pb-6 sm:pb-8" : "pb-12 sm:pb-16 lg:pb-20"
+          }`}
+        >
           <p className="eyebrow !text-gold-300">A national Messianic student fellowship</p>
           <h1 className="max-w-[820px] font-serif text-[clamp(40px,6.2vw,80px)] font-semibold leading-[1.03]">
             Grounded in Truth.
@@ -67,6 +86,13 @@ export function HomePage() {
               Find a church near you
             </Link>
           </div>
+
+          {/* Event banner sits in the open space below the buttons (managed in Administration → Homepage banner) */}
+          {banner && (
+            <div className="mt-4 sm:mt-8">
+              <HomeBannerStrip banner={banner} />
+            </div>
+          )}
         </div>
       </section>
 
@@ -102,7 +128,9 @@ export function HomePage() {
         </div>
         <div className="flex items-center justify-center rounded-lg border border-line bg-white p-8 sm:p-10">
           <img
-            src="/brand/msak-crest-400.png"
+            src="/brand/msak-crest-400.webp"
+            width={400}
+            height={400}
             alt="The MSAK crest: a menorah on a shield inside a gold ring, with the words Messianic Students Association of Kenya"
             className="h-auto w-full max-w-[320px]"
             loading="lazy"
@@ -154,7 +182,7 @@ export function HomePage() {
             </Link>
           </div>
           <div className="h-[340px] overflow-hidden rounded-xl border border-line-strong sm:h-[440px] lg:h-[500px]">
-            <ChurchMap churches={shown} fitKey={`home-${assoc}-${shown.length}`} wheelZoom={false} />
+            <LazyChurchMap churches={shown} fitKey={`home-${assoc}-${shown.length}`} wheelZoom={false} />
           </div>
         </div>
       </section>

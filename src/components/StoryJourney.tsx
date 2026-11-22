@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Photo } from "./Photo";
 
 type Stop = { numeral: string; year: string; label: string; title: string; text: string; photo?: string; alt?: string };
 
@@ -19,7 +20,7 @@ const STOPS: Stop[] = [
     label: "4 February 2017",
     title: "The first rally",
     text: "The University of Eldoret hosted students from Kabianga, Moi and Kisii universities and colleges in Eldoret. Before they went home, an interim national leadership had been formed.",
-    photo: "/photos/photo-0058.jpg",
+    photo: "/photos/photo-0058",
     alt: "Students singing together at an MSAK rally",
   },
   {
@@ -42,7 +43,7 @@ const STOPS: Stop[] = [
     label: "2018 – today",
     title: "Passing the lamp",
     text: "The third national rally at Egerton was a success. As the founders graduated, leadership passed to new students — and MSAK kept growing.",
-    photo: "/photos/photo-0029.jpg",
+    photo: "/photos/photo-0029",
     alt: "MSAK student leaders holding certificates",
   },
   {
@@ -192,7 +193,7 @@ export function StoryJourney() {
                   active ? "-translate-y-1 bg-ivory shadow-[0_18px_40px_rgba(0,0,0,0.35)]" : "bg-navy-800 opacity-60"
                 }`}
               >
-                {s.photo && <img src={s.photo} alt={s.alt} loading="lazy" className="h-40 w-full object-cover sm:h-48" />}
+                {s.photo && <Photo src={s.photo} alt={s.alt ?? ""} sizes="(min-width: 640px) 360px, 85vw" className="h-40 w-full object-cover sm:h-48" />}
                 <div className="flex flex-col gap-2.5 p-6">
                   <span className={`text-xs font-bold uppercase tracking-[0.16em] ${active ? "text-gold-700" : "text-gold-300"}`}>
                     Stop {s.numeral} · {s.label}

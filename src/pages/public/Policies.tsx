@@ -1,14 +1,12 @@
-import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { policies, policyList } from "../../lib/policies";
 import { formatDate } from "../../lib/format";
 import { NotFoundPage } from "./NotFound";
+import { useSeo } from "../../lib/seo";
 
 export function PoliciesPage() {
-  useEffect(() => {
-    document.title = "Policies — MSAK";
-  }, []);
+  useSeo({ title: "Policies", description: "MSAK's terms, privacy policy, membership, leadership, announcements and community guidelines.", path: "/policies" });
   return (
     <div className="container-page py-10 lg:py-14">
       <p className="eyebrow mb-1">Policies and terms</p>
@@ -33,9 +31,7 @@ export function PoliciesPage() {
 export function PolicyPage() {
   const { slug = "" } = useParams();
   const doc = Object.hasOwn(policies, slug) ? policies[slug] : undefined;
-  useEffect(() => {
-    if (doc) document.title = `${doc.title} — MSAK`;
-  }, [doc]);
+  useSeo({ title: doc?.title ?? "Policy not found", description: doc?.description, path: `/policies/${slug}`, noindex: !doc });
   if (!doc) return <NotFoundPage />;
   return (
     <article className="container-page max-w-3xl py-10 lg:py-14">

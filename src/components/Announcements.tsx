@@ -5,6 +5,7 @@ import { audienceLabel, timeAgo } from "../lib/format";
 import { shortInstitution, type Lookup } from "../lib/directory";
 import type { Announcement, Audience, Me } from "../lib/types";
 import { Alert, AudienceBadge, SelectInput, TextArea, TextInput } from "./ui";
+import { isRoleActive } from "../lib/academic";
 
 export function AnnouncementItem({
   a,
@@ -78,7 +79,8 @@ export function Composer({
   audiences: Audience[];
   onPosted: () => void;
 }) {
-  const roleFor = (aud: Audience) => me.roles.find((r) => r.status === "approved" && r.level === aud);
+  // Alumni posts are made under a national role.
+  const roleFor = (aud: Audience) => me.roles.find((r) => isRoleActive(r) && r.level === (aud === "alumni" ? "national" : aud));
   const [audience, setAudience] = useState<Audience>(audiences[0]);
   const [assocId, setAssocId] = useState<number>(lookup.associationOfInstitution(me.profile?.institution_id)?.id ?? lookup.associations[0]?.id ?? 1);
   const [instId, setInstId] = useState<number>(
@@ -93,6 +95,8 @@ export function Composer({
   const target =
     audience === "national"
       ? "all MSAK members"
+      : audience === "alumni"
+        ? "all alumni members"
       : audience === "regional"
         ? `members of ${lookup.association(role ? role.association_id : assocId)?.code ?? "the association"}`
         : `members at ${lookup.institution(role ? role.institution_id : instId)?.name ?? "the institution"}`;

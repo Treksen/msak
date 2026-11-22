@@ -4,14 +4,17 @@ import { Phone } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { usePortal } from "../../lib/portal";
 import { formatDate, levelLabel, timeAgo } from "../../lib/format";
-import type { LeaderRoleWithPerson, RoleStatus } from "../../lib/types";
+import type { LeaderRoleWithPerson } from "../../lib/types";
+import { formatDay, roleState, type RoleState } from "../../lib/academic";
 import { Alert, EmptyState, PageHeader, Spinner, StatusBadge } from "../../components/ui";
 
-const tabs: { id: RoleStatus; label: string }[] = [
-  { id: "pending", label: "Waiting" },
-  { id: "approved", label: "Active leaders" },
-  { id: "rejected", label: "Declined" },
-  { id: "revoked", label: "Revoked" },
+type Tab = "waiting" | "active" | "expired" | "rejected" | "revoked";
+const tabs: { id: Tab; label: string; states: RoleState[] }[] = [
+  { id: "waiting", label: "Waiting", states: ["pending", "renewal"] },
+  { id: "active", label: "Active leaders", states: ["active"] },
+  { id: "expired", label: "Expired", states: ["expired"] },
+  { id: "rejected", label: "Declined", states: ["rejected"] },
+  { id: "revoked", label: "Revoked", states: ["revoked"] },
 ];
 
 /**
@@ -21,7 +24,7 @@ const tabs: { id: RoleStatus; label: string }[] = [
 export function LeadersPage() {
   const { lookup, perms } = usePortal();
   const [rows, setRows] = useState<LeaderRoleWithPerson[] | null>(null);
-  const [tab, setTab] = useState<RoleStatus>("pending");
+  const [tab, setTab] = useState<Tab>("waiting");
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -51,8 +54,9 @@ export function LeadersPage() {
     }
   }
 
-  const shown = (rows ?? []).filter((r) => r.status === tab);
-  const count = (s: RoleStatus) => (rows ?? []).filter((r) => r.status === s).length;
+  const inTab = (t: Tab) => (r: LeaderRoleWithPerson) => tabs.find((x) => x.id === t)!.states.includes(roleState(r));
+  const shown = (rows ?? []).filter(inTab(tab));
+  const count = (t: Tab) => (rows ?? []).filter(inTab(t)).length;
 
   return (
     <div>
@@ -86,7 +90,7 @@ export function LeadersPage() {
       {rows === null ? (
         <Spinner />
       ) : shown.length === 0 ? (
-        <EmptyState title={tab === "pending" ? "No requests waiting" : "Nothing here"} />
+        <EmptyState title={tab === "waiting" ? "No requests waiting" : "Nothing here"} />
       ) : (
         <ul className="card divide-y divide-[#efebe0]">
           {shown.map((r) => (
@@ -110,13 +114,20 @@ export function LeadersPage() {
                     </a>
                   )}
                   <span>
-                    {r.status === "pending" ? `requested ${timeAgo(r.requested_at)}` : `${r.status} ${r.reviewed_at ? formatDate(r.reviewed_at) : ""}`}
+                    {roleState(r) === "pending"
+                      ? `requested ${timeAgo(r.requested_at)}`
+                      : roleState(r) === "renewal"
+                        ? `renewal requested ${timeAgo(r.renewal_requested_at!)} · current term ends ${formatDay(r.term_ends_on)}`
+                        : r.status === "approved"
+                          ? `${roleState(r) === "expired" ? "term ended" : "term ends"} ${formatDay(r.term_ends_on)}`
+                          : `${r.status} ${r.reviewed_at ? formatDate(r.reviewed_at) : ""}`}
                   </span>
                 </p>
                 {r.review_note && <p className="mt-1 text-[13px] italic text-muted">“{r.review_note}”</p>}
               </div>
               <div className="flex flex-none flex-wrap gap-2">
-                {r.status === "pending" ? (
+                {roleState(r) === "renewal" && <span className="badge badge-pending self-center">Renewal</span>}
+                {roleState(r) === "pending" || roleState(r) === "renewal" ? (
                   <>
                     <button
                       type="button"
@@ -139,7 +150,7 @@ export function LeadersPage() {
                       Decline
                     </button>
                   </>
-                ) : r.status === "approved" ? (
+                ) : roleState(r) === "active" ? (
                   <button
                     type="button"
                     className="btn btn-danger btn-sm"
@@ -153,7 +164,7 @@ export function LeadersPage() {
                     Revoke
                   </button>
                 ) : (
-                  <StatusBadge status={r.status} />
+                  <StatusBadge status={roleState(r)} />
                 )}
               </div>
             </li>

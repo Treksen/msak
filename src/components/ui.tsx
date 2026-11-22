@@ -145,9 +145,9 @@ export function Modal({ open, title, onClose, children, wide }: { open: boolean;
 
 export function StatusBadge({ status }: { status: string }) {
   const cls =
-    status === "approved" || status === "published"
+    status === "approved" || status === "published" || status === "active"
       ? "badge-ok"
-      : status === "pending" || status === "suggested"
+      : status === "pending" || status === "suggested" || status === "renewal"
         ? "badge-pending"
         : "badge-muted";
   return <span className={`badge ${cls}`}>{status}</span>;
@@ -158,6 +158,7 @@ export function AudienceBadge({ audience }: { audience: string }) {
     institutional: ["badge-campus", "Campus"],
     regional: ["badge-region", "Region"],
     national: ["badge-national", "National"],
+    alumni: ["badge-alumni", "Alumni"],
   };
   const [cls, label] = map[audience] ?? ["badge-muted", audience];
   return <span className={`badge ${cls}`}>{label}</span>;

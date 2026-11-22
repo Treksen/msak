@@ -1,11 +1,18 @@
 import type { Api } from "./api";
+import { isBannerLive } from "./banners";
+import { academicYearEnd, addDays, isAlumni, isRoleActive, kenyaToday, roleState } from "./academic";
 import type {
   Announcement,
   Church,
+  ChurchReport,
+  AdminDashboard,
+  AuditEntry,
+  ErrorEntry,
   DemoPersona,
   Directory,
   DocumentItem,
   FeedbackItem,
+  HomeBanner,
   LeaderLevel,
   LeaderRole,
   Profile,
@@ -19,7 +26,7 @@ import churchSeed from "../data/churches.seed.json";
  * so you can preview every role before connecting Supabase.
  */
 
-const KEY = "msak-demo-v2";
+const KEY = "msak-demo-v6";
 const directory = directoryJson as Directory;
 
 type DemoUser = { id: string; email: string; password: string };
@@ -33,6 +40,10 @@ type State = {
   churches: Church[];
   documents: StoredDoc[];
   feedback: FeedbackItem[];
+  banners: HomeBanner[];
+  reports?: ChurchReport[];
+  audit?: AuditEntry[];
+  errors?: ErrorEntry[];
   session: string | null;
 };
 
@@ -93,6 +104,8 @@ function seed(): State {
     requested_at: ago(48),
     reviewed_at: status === "pending" ? null : ago(24),
     review_note: null,
+    term_ends_on: status === "approved" ? academicYearEnd() : null,
+    renewal_requested_at: null,
   });
 
   const users: DemoUser[] = [
@@ -103,6 +116,7 @@ function seed(): State {
     { id: "demo-admin", email: "admin@demo.msak", password: "demo1234" },
     { id: "demo-applicant-1", email: "a1@demo.msak", password: "demo1234" },
     { id: "demo-applicant-2", email: "a2@demo.msak", password: "demo1234" },
+    { id: "demo-alumnus", email: "alumni@demo.msak", password: "demo1234" },
   ];
   const profiles = [
     person("demo-member", "Moses Mwangi", "Male", jkuat, 1),
@@ -111,7 +125,8 @@ function seed(): State {
     person("demo-national", "Wanjiru Achieng", "Female", westInst, 3),
     person("demo-applicant-1", "Kevin Kiprono", "Male", ku, 2),
     person("demo-applicant-2", "Grace Muthoni", "Female", nyeriInst, 3),
-  ];
+    { ...person("demo-alumnus", "Peter Kamau", "Male", ku, 4), admission_year: 2018, expected_completion_year: 2022 },
+  ].map((p, i) => ({ ...p, created_at: ago(24 * (330 - i * 52)) })); // joined over the past year, for the dashboard chart
   const roles = [
     role("demo-institutional", "institutional", "Secretary", jkuat, "approved"),
     role("demo-regional", "regional", "Chairperson", ku, "approved"),
@@ -182,6 +197,19 @@ function seed(): State {
     churches,
     documents: [],
     feedback: [],
+    banners: [
+      {
+        id: newId(),
+        title: "MSAK National Rally 2027",
+        venue: "Kenyatta University",
+        starts_at: "2027-02-26T08:00:00+03:00",
+        ends_at: "2027-02-28T18:00:00+03:00",
+        link_url: null,
+        link_label: null,
+        is_active: true,
+        created_at: now(),
+      },
+    ],
     session: null,
   };
 }
@@ -218,7 +246,7 @@ export function createDemoApi(): Api {
     s.roles.some(
       (r) =>
         r.user_id === u &&
-        r.status === "approved" &&
+        isRoleActive(r) &&
         r.level === level &&
         (assoc == null || r.association_id === assoc) &&
         (inst == null || r.institution_id === inst),
@@ -227,8 +255,13 @@ export function createDemoApi(): Api {
     isAdmin(u) || hasRole(u, "national") || hasRole(u, "regional", assoc) || hasRole(u, "institutional", assoc);
   const canViewMember = (u: string, inst: number) =>
     isAdmin(u) || hasRole(u, "national") || hasRole(u, "regional", assocOf(inst)) || hasRole(u, "institutional", null, inst);
+  const requireAdmin = () => {
+    const u = me();
+    if (!isAdmin(u)) throw new Error("Administrator permission required.");
+    return u;
+  };
 
-  return {
+  const base: Api = {
     mode: "demo",
 
     async getDirectory() {
@@ -301,6 +334,8 @@ export function createDemoApi(): Api {
           requested_at: now(),
           reviewed_at: null,
           review_note: null,
+          term_ends_on: null,
+          renewal_requested_at: null,
         });
       }
       s.session = id;
@@ -361,8 +396,14 @@ export function createDemoApi(): Api {
       const u = me();
       const p = profileOf(u);
       if (!p) throw new Error("Complete your profile first.");
-      if (s.roles.some((r) => r.user_id === u && r.level === level && ["pending", "approved"].includes(r.status))) {
-        throw new Error(`You already have a ${level} role that is pending or approved.`);
+      const held = s.roles.find((r) => r.user_id === u && r.level === level && ["pending", "approved"].includes(r.status));
+      if (held?.status === "pending") throw new Error(`You already have a ${level} request waiting for approval.`);
+      if (held) {
+        held.renewal_requested_at = now();
+        held.position = position.trim();
+        held.review_note = null;
+        save();
+        return;
       }
       s.roles.push({
         id: newId(),
@@ -375,7 +416,18 @@ export function createDemoApi(): Api {
         requested_at: now(),
         reviewed_at: null,
         review_note: null,
+        term_ends_on: null,
+        renewal_requested_at: null,
       });
+      save();
+    },
+
+    async renewLeaderRole(id) {
+      const u = me();
+      const r = s.roles.find((x) => x.id === id && x.user_id === u && x.status === "approved");
+      if (!r) throw new Error("Only an approved role of yours can be renewed.");
+      r.renewal_requested_at = now();
+      r.review_note = null;
       save();
     },
 
@@ -393,12 +445,25 @@ export function createDemoApi(): Api {
     async reviewLeaderRole(id, approve, note) {
       const u = me();
       const r = s.roles.find((x) => x.id === id);
-      if (!r || r.status !== "pending") throw new Error("That request is no longer pending.");
+      if (!r || !(r.status === "pending" || (r.status === "approved" && r.renewal_requested_at))) {
+        throw new Error("That request is no longer waiting.");
+      }
       if (r.user_id === u) throw new Error("You cannot review your own request.");
       if (!(isAdmin(u) || (r.level === "institutional" && hasRole(u, "regional", r.association_id)))) {
         throw new Error("You are not allowed to review this request.");
       }
-      r.status = approve ? "approved" : "rejected";
+      const today = kenyaToday();
+      if (r.status === "pending") {
+        r.status = approve ? "approved" : "rejected";
+        r.term_ends_on = approve ? academicYearEnd(addDays(today, 30)) : null;
+      } else {
+        // renewal: approving extends to the next 31 August; declining lets the term run out
+        if (approve) {
+          const from = r.term_ends_on && addDays(r.term_ends_on, 1) > today ? addDays(r.term_ends_on, 1) : today;
+          r.term_ends_on = academicYearEnd(from);
+        }
+        r.renewal_requested_at = null;
+      }
       r.reviewed_at = now();
       r.review_note = note?.trim() || null;
       save();
@@ -423,15 +488,17 @@ export function createDemoApi(): Api {
       if (!p && !isAdmin(u)) return [];
       const myInst = p?.institution_id ?? null;
       const myAssoc = assocOf(myInst);
+      const alumni = isAlumni(p);
       return s.announcements
         .filter(
           (a) =>
             a.audience === "national" ||
+            (a.audience === "alumni" && alumni) ||
             (a.audience === "regional" && a.association_id === myAssoc) ||
-            (a.audience === "institutional" && a.institution_id === myInst) ||
+            (a.audience === "institutional" && a.institution_id === myInst && !alumni) ||
             a.author_id === u ||
             isAdmin(u) ||
-            hasRole(u, "regional", a.association_id) ||
+            ((a.audience === "regional" || a.audience === "institutional") && hasRole(u, "regional", a.association_id)) ||
             hasRole(u, "national"),
         )
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -441,20 +508,25 @@ export function createDemoApi(): Api {
       const u = me();
       if (input.title.trim().length < 3) throw new Error("Title must be 3–160 characters.");
       if (!input.body.trim()) throw new Error("Write a message.");
-      const role = s.roles.find((r) => r.user_id === u && r.level === input.audience && r.status === "approved");
+      const level = input.audience === "alumni" ? "national" : input.audience;
+      const role = s.roles.find((r) => r.user_id === u && r.level === level && isRoleActive(r));
       let assoc: number | null;
       let inst: number | null;
       if (role) {
-        assoc = role.association_id;
-        inst = role.institution_id;
+        assoc = input.audience === "alumni" ? null : role.association_id;
+        inst = input.audience === "alumni" ? null : role.institution_id;
       } else if (isAdmin(u)) {
         inst = input.audience === "institutional" ? input.institution_id ?? null : null;
         assoc =
-          input.audience === "national" ? null : input.audience === "institutional" ? assocOf(inst) : input.association_id ?? null;
+          input.audience === "national" || input.audience === "alumni"
+            ? null
+            : input.audience === "institutional"
+              ? assocOf(inst)
+              : input.association_id ?? null;
         if (input.audience === "institutional" && !inst) throw new Error("Choose the institution.");
         if (input.audience === "regional" && !assoc) throw new Error("Choose the association.");
       } else {
-        throw new Error(`You need an approved ${input.audience} leader role to post this.`);
+        throw new Error(`You need an active ${level} leader role to post this.`);
       }
       const code = directory.associations.find((a) => a.id === assoc)?.code;
       s.announcements.push({
@@ -463,7 +535,7 @@ export function createDemoApi(): Api {
         // Leaders sign with their name; administrators are never named to members.
         author_name: role ? profileOf(u)?.full_name ?? "MSAK" : "MSAK",
         author_title: role
-          ? `${input.audience[0].toUpperCase()}${input.audience.slice(1)} leader · ${role.position}${code ? ` · ${code}` : ""}`
+          ? `${role.level[0].toUpperCase()}${role.level.slice(1)} leader · ${role.position}${code ? ` · ${code}` : ""}`
           : "MSAK National Office",
         audience: input.audience,
         association_id: assoc,
@@ -526,6 +598,43 @@ export function createDemoApi(): Api {
       if (!c) return;
       if (!canManageChurches(u, c.association_id)) throw new Error("You don't have permission to do that.");
       s.churches = s.churches.filter((x) => x.id !== id);
+      save();
+    },
+
+    async uploadChurchPhoto(file) {
+      me();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    },
+
+    async reportChurch(churchId, message) {
+      const u = me();
+      if (!profileOf(u) && !isAdmin(u)) throw new Error("You don't have permission to do that.");
+      if (message.trim().length < 5) throw new Error("Tell us what's wrong (at least 5 characters).");
+      s.reports = s.reports ?? [];
+      s.reports.unshift({ id: newId(), church_id: churchId, reporter_id: u, message: message.trim(), status: "open", created_at: now(), resolved_at: null });
+      save();
+    },
+
+    async listChurchReports() {
+      const u = me();
+      return (s.reports ?? []).filter((r) => {
+        const c = s.churches.find((x) => x.id === r.church_id);
+        return r.reporter_id === u || (c && canManageChurches(u, c.association_id));
+      });
+    },
+
+    async resolveChurchReport(id) {
+      const u = me();
+      const r = (s.reports ?? []).find((x) => x.id === id);
+      const c = r && s.churches.find((x) => x.id === r.church_id);
+      if (!r || !c || !canManageChurches(u, c.association_id)) throw new Error("You don't have permission to do that.");
+      r.status = "resolved";
+      r.resolved_at = now();
       save();
     },
 
@@ -607,10 +716,177 @@ export function createDemoApi(): Api {
       save();
     },
 
+    async listLiveBanners() {
+      return (s.banners ?? []).filter((b) => isBannerLive(b)).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    },
+
+    async listAllBanners() {
+      if (!isAdmin(me())) throw new Error("Administrator permission required.");
+      return [...(s.banners ?? [])].sort((a, b) => b.starts_at.localeCompare(a.starts_at));
+    },
+
+    async saveBanner(input, id) {
+      if (!isAdmin(me())) throw new Error("Administrator permission required.");
+      if (input.title.trim().length < 3) throw new Error("Title must be 3–120 characters.");
+      if (input.ends_at && input.ends_at < input.starts_at) throw new Error("The end must be after the start.");
+      s.banners = s.banners ?? [];
+      if (id) {
+        const b = s.banners.find((x) => x.id === id);
+        if (b) Object.assign(b, input);
+      } else {
+        s.banners.push({ ...input, id: newId(), created_at: now() });
+      }
+      save();
+    },
+
+    async deleteBanner(id) {
+      if (!isAdmin(me())) throw new Error("Administrator permission required.");
+      s.banners = (s.banners ?? []).filter((b) => b.id !== id);
+      save();
+    },
+
     async addInstitution(countyId, name) {
       if (!isAdmin(me())) throw new Error("Administrator permission required.");
       const nextId = Math.max(...directory.institutions.map((i) => i.id)) + 1;
       directory.institutions.push({ id: nextId, county_id: countyId, name: name.trim() });
     },
+
+    async adminDashboard(): Promise<AdminDashboard> {
+      requireAdmin();
+      const today = kenyaToday();
+      const active = s.roles.filter((r) => isRoleActive(r));
+      const months: string[] = [];
+      const d = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
+      for (let i = 11; i >= 0; i--) {
+        const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1));
+        months.push(m.toISOString().slice(0, 7));
+      }
+      const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      return {
+        members: s.profiles.length,
+        students: s.profiles.filter((p) => !isAlumni(p)).length,
+        alumni: s.profiles.filter(isAlumni).length,
+        by_association: [...directory.associations]
+          .sort((a, b) => a.code.localeCompare(b.code))
+          .map((a) => {
+            const ps = s.profiles.filter((p) => assocOf(p.institution_id) === a.id);
+            const cs = s.churches.filter((c) => c.association_id === a.id && c.status === "published");
+            return {
+              association_id: a.id,
+              code: a.code,
+              name: a.name,
+              students: ps.filter((p) => !isAlumni(p)).length,
+              alumni: ps.filter(isAlumni).length,
+              churches: cs.length,
+              churches_confirmed: cs.filter((c) => c.location_verified).length,
+            };
+          }),
+        signups: months.map((month) => ({ month, count: s.profiles.filter((p) => p.created_at.slice(0, 7) === month).length })),
+        leaders: {
+          national: active.filter((r) => r.level === "national").length,
+          regional: active.filter((r) => r.level === "regional").length,
+          institutional: active.filter((r) => r.level === "institutional").length,
+          waiting: s.roles.filter((r) => ["pending", "renewal"].includes(roleState(r))).length,
+          expired: s.roles.filter((r) => roleState(r) === "expired").length,
+        },
+        churches_suggested: s.churches.filter((c) => c.status === "suggested").length,
+        open_reports: (s.reports ?? []).filter((r) => r.status === "open").length,
+        errors_7d: (s.errors ?? []).filter((e) => e.at > weekAgo).length,
+        activity_7d: (s.audit ?? []).filter((e) => e.at > weekAgo).length,
+      };
+    },
+
+    async listAuditLog(opts = {}) {
+      requireAdmin();
+      return (s.audit ?? []).filter((e) => (!opts.before || e.id < opts.before) && (!opts.entity || e.entity === opts.entity)).slice(0, 50);
+    },
+
+    async listErrorLog(opts = {}) {
+      requireAdmin();
+      return (s.errors ?? []).filter((e) => !opts.before || e.id < opts.before).slice(0, 50);
+    },
+
+    async deleteErrorEntry(id) {
+      requireAdmin();
+      s.errors = (s.errors ?? []).filter((e) => e.id !== id);
+      save();
+    },
+
+    async purgeLogs(days) {
+      requireAdmin();
+      if (!Number.isFinite(days) || days < 7) throw new Error("Keep at least the last 7 days.");
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+      const before = (s.audit ?? []).length + (s.errors ?? []).length;
+      s.audit = (s.audit ?? []).filter((e) => e.at >= cutoff);
+      s.errors = (s.errors ?? []).filter((e) => e.at >= cutoff);
+      save();
+      return before - s.audit.length - s.errors.length;
+    },
+
+    async logClientError(r) {
+      s.errors = s.errors ?? [];
+      const id = (s.errors[0]?.id ?? 0) + 1;
+      s.errors.unshift({ id, at: now(), user_id: s.session, message: r.message.slice(0, 1000), stack: r.stack?.slice(0, 4000) ?? null, url: r.url.slice(0, 500), user_agent: r.userAgent.slice(0, 300) });
+      s.errors = s.errors.slice(0, 200);
+      save();
+    },
   };
+
+  // Demo activity log: record what people do, like the database's audit triggers.
+  const logged: Partial<Record<keyof Api, [entity: string, action: AuditEntry["action"]]>> = {
+    postAnnouncement: ["announcements", "insert"],
+    deleteAnnouncement: ["announcements", "delete"],
+    requestLeaderRole: ["leader_roles", "insert"],
+    renewLeaderRole: ["leader_roles", "update"],
+    reviewLeaderRole: ["leader_roles", "update"],
+    revokeLeaderRole: ["leader_roles", "update"],
+    saveChurch: ["churches", "update"],
+    deleteChurch: ["churches", "delete"],
+    reportChurch: ["church_reports", "insert"],
+    resolveChurchReport: ["church_reports", "update"],
+    uploadDocument: ["documents", "insert"],
+    deleteDocument: ["documents", "delete"],
+    setAdmin: ["admins", "update"],
+    saveBanner: ["home_banners", "update"],
+    deleteBanner: ["home_banners", "delete"],
+    addInstitution: ["institutions", "insert"],
+  };
+  const summarise = (args: unknown[]): string | null => {
+    for (const a of args) {
+      if (a && typeof a === "object") {
+        const o = a as Record<string, unknown>;
+        const t = o.title ?? o.name ?? o.full_name ?? o.message;
+        if (typeof t === "string") return t.slice(0, 200);
+      }
+    }
+    const str = args.find((a): a is string => typeof a === "string" && a.length > 2 && !/^[0-9a-f-]{8,}$/i.test(a));
+    return str ? str.slice(0, 200) : null;
+  };
+  const wrapped = { ...base } as Record<string, unknown>;
+  for (const [name, [entity, action]] of Object.entries(logged) as [string, [string, AuditEntry["action"]]][]) {
+    const fn = (base as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[name];
+    wrapped[name] = async (...args: unknown[]) => {
+      const out = await fn(...args);
+      const u = s.session;
+      if (u) {
+        s.audit = s.audit ?? [];
+        const isNew = (name === "saveChurch" || name === "saveBanner") && args[1] == null;
+        s.audit.unshift({
+          id: (s.audit[0]?.id ?? 0) + 1,
+          at: now(),
+          actor_id: u,
+          actor_label: isAdmin(u) ? "Admin · Demo administrator" : (profileOf(u)?.full_name ?? "Member"),
+          action: isNew ? "insert" : action,
+          entity,
+          entity_id: typeof args[0] === "string" && /^[0-9a-z-]{6,}$/i.test(args[0]) ? args[0] : null,
+          summary: summarise(args),
+          changes: null,
+        });
+        s.audit = s.audit.slice(0, 500);
+        save();
+      }
+      return out;
+    };
+  }
+  return wrapped as unknown as Api;
 }

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
-import type { Directory, LeaderLevel, LeaderRole, Me } from "./types";
+import type { Audience, Directory, LeaderLevel, LeaderRole, Me } from "./types";
+import { isRoleActive } from "./academic";
 
 type AuthState = {
   /** undefined while we are still finding out; null when logged out. */
@@ -60,8 +61,9 @@ export function useMe(): Me {
   return me;
 }
 
+/** Roles that currently carry privileges: approved and within their term (until 31 August). */
 export function approvedRoles(me: Me | null | undefined): LeaderRole[] {
-  return me ? me.roles.filter((r) => r.status === "approved") : [];
+  return me ? me.roles.filter(isRoleActive) : [];
 }
 
 export function roleOf(me: Me | null | undefined, level: LeaderLevel): LeaderRole | undefined {
@@ -73,9 +75,10 @@ export function permissions(me: Me | null | undefined, myAssociationId: number |
   const roles = approvedRoles(me);
   const isAdmin = !!me?.isAdmin;
   const isLeader = roles.length > 0;
-  const postAudiences: LeaderLevel[] = isAdmin
-    ? ["institutional", "regional", "national"]
-    : roles.map((r) => r.level);
+  const levels: LeaderLevel[] = roles.map((r) => r.level);
+  const postAudiences: Audience[] = isAdmin
+    ? ["institutional", "regional", "national", "alumni"]
+    : [...levels, ...(levels.includes("national") ? (["alumni"] as const) : [])];
   return {
     isAdmin,
     isLeader,

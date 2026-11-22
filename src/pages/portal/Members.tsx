@@ -7,6 +7,7 @@ import { usePortal } from "../../lib/portal";
 import { downloadCsv, levelLabel } from "../../lib/format";
 import type { MemberRow } from "../../lib/types";
 import { Alert, EmptyState, PageHeader, Spinner } from "../../components/ui";
+import { isAlumni, isRoleActive, roleState } from "../../lib/academic";
 
 /** Members a leader can see: campus leaders → their campus; regional → association; national/admin → everyone. */
 export function MembersPage() {
@@ -35,8 +36,8 @@ export function MembersPage() {
     return (rows ?? []).filter((m) => {
       const a = lookup.associationOfInstitution(m.institution_id);
       if (assoc !== "all" && a?.id !== assoc) return false;
-      if (status === "alumni" && m.expected_completion_year >= year) return false;
-      if (status === "students" && m.expected_completion_year < year) return false;
+      if (status === "alumni" && !isAlumni(m)) return false;
+      if (status === "students" && isAlumni(m)) return false;
       if (!term) return true;
       return `${m.full_name} ${m.phone} ${m.course} ${lookup.placeLabel(m.institution_id)}`.toLowerCase().includes(term);
     });
@@ -58,7 +59,7 @@ export function MembersPage() {
         m.course,
         m.year_of_study,
         m.expected_completion_year,
-        m.roles.filter((r) => r.status === "approved").map((r) => `${levelLabel[r.level]} ${r.position}`).join("; "),
+        m.roles.filter(isRoleActive).map((r) => `${levelLabel[r.level]} ${r.position}`).join("; "),
       ]),
     ]);
   }
@@ -86,7 +87,7 @@ export function MembersPage() {
           </label>
           <input id="member-search" type="search" className="input pl-10" placeholder="Name, phone, campus, course" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {(perms.isAdmin || me.roles.some((r) => r.status === "approved" && r.level === "national")) && (
+        {(perms.isAdmin || me.roles.some((r) => isRoleActive(r) && r.level === "national")) && (
           <>
             <label htmlFor="member-assoc" className="sr-only">
               Association
@@ -143,12 +144,17 @@ export function MembersPage() {
                       <a href={`tel:${m.phone.replace(/\s/g, "")}`}>{m.phone}</a>
                     </td>
                     <td className="px-4 py-3 text-body">
-                      {m.expected_completion_year < year ? "Alumni" : `Y${m.year_of_study} · ${m.expected_completion_year}`}
+                      {isAlumni(m) ? `Alumni · ${m.expected_completion_year}` : `Y${m.year_of_study} · ${m.expected_completion_year}`}
                     </td>
                     <td className="px-4 py-3 text-body">
                       {m.roles.length === 0
                         ? "Member"
-                        : m.roles.map((r) => `${levelLabel[r.level]}${r.status === "pending" ? " (pending)" : ""}`).join(", ")}
+                        : m.roles
+                            .map((r) => {
+                              const st = roleState(r);
+                              return `${levelLabel[r.level]}${st === "active" ? "" : ` (${st})`}`;
+                            })
+                            .join(", ")}
                     </td>
                     {perms.isAdmin && (
                       <td className="px-4 py-3 text-right">

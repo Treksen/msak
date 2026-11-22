@@ -57,8 +57,12 @@ With no Supabase keys the app runs in **demo mode**: sample data lives in your b
    "MSAK National Office" and churches you add are credited to "MSAK". Add more admins the same way, or promote a
    registered member from **Members**.
 
-> Already ran an older `01_schema.sql` (before 22 Nov 2026)? Run `supabase/04_admin_accounts_migration.sql` once
-> to get admin accounts without a profile. A fresh setup doesn't need it.
+> Already ran an older `01_schema.sql`? Run the migrations you haven't run yet, once each, in order:
+> `04_admin_accounts_migration.sql` (admin accounts without a profile), `05_home_banners_migration.sql`
+> (homepage event banner) and `06_terms_alumni_logs_migration.sql` (leadership terms, alumni, church reports &
+> photos, audit and error logs), `07_church_pins_fix.sql` (church pins from the old site's map) and
+> `08_admin_dashboard_migration.sql` (admin dashboard figures, log clean-up). A fresh setup with the current
+> `01_schema.sql` and `02_seed.sql` doesn't need them.
 
 > Email: Supabase's built-in mailer is rate-limited (a few emails per hour). Before launch, add an SMTP provider
 > (e.g. Resend, Brevo) under **Authentication → Emails → SMTP Settings**, and customise the confirmation and
@@ -88,7 +92,43 @@ screens only hide buttons you can't use.
 Leader requests start as **pending** — from registration or later from *My profile*. A member who changes institution
 automatically loses their campus role (and regional role if the association changes).
 
+## 4b. Academic year: leadership terms and alumni
+
+- The academic year ends on **31 August** (Kenya time).
+- **Leader roles** are approved until the next 31 August. After that they carry no posting or approval rights until
+  the leader taps **Renew for next year** (My profile, from 1 July or any time after expiry) **and** the usual approver
+  approves again (admin for national/regional, regional leaders for campus leaders). Renewals appear in
+  **Leader approvals → Waiting**, marked "Renewal".
+- **Alumni:** a member becomes alumni after 31 August of their expected completion year. Alumni get national,
+  regional and **alumni** announcements (not their old campus's). National leaders and admins can post to alumni.
+  Repeating a year or deferred? The member updates their completion year in My profile and is a student again.
+
+## 4c. Admin dashboard and logs (administrators only)
+
+- **Administration** opens with the dashboard: members (students / alumni), active leaders, approvals waiting,
+  churches to check, and this week's activity and app errors, plus members-by-association and new-members charts
+  (each has a "Show table" switch) and how many church pins are confirmed on site.
+- **Activity & error logs** (`/app/admin/logs`): every change made in the portal (who, what, when, which fields),
+  and errors the app hit on people's devices. Errors are sent automatically (once per visit, never while offline;
+  only the page path is sent, never links with tokens). Members and leaders can't read either log.
+- **Clear old entries** removes log entries older than 30/90/180/365 days.
+
+## 4d. Speed and Google
+
+- **Faster on phones:** only the home page is in the first download; every other page, and the map library, loads
+  when it's needed. Photos are WebP in two sizes (phones get the small one). After a new release, an open tab
+  reloads itself once instead of breaking.
+- **Google:** each public page has its own title, description and canonical address; sharing a link shows the
+  MSAK preview image (`public/og-image.jpg`). Each build writes `sitemap.xml` and `robots.txt` (portal and sign-in
+  pages are kept out of search). Google also gets structured data about MSAK and every church on the public map.
+- **Set `VITE_SITE_URL`** in Vercel → Settings → Environment Variables to your real address once you have your own
+  domain (without it, Vercel's production domain is used).
+- **Tell Google about the site:** open Google Search Console, add your site address, verify it (the DNS or HTML-tag
+  option), then under **Sitemaps** submit `sitemap.xml`. Pages usually appear in results within days to a few weeks.
+
 ## 5. The church map
+
+**Maps.** The church maps open on the OpenStreetMap street map; the Satellite button shows Esri World Imagery (free, no key) with full detail to zoom 19.
 
 - Public at `/churches` — no login needed. “Near me” sorts by distance using the phone's GPS.
 - Leaders: **Churches → Add a church → Use my location** while standing at the church drops the pin exactly; tick
@@ -106,7 +146,15 @@ automatically loses their campus role (and regional role if the association chan
   and, if needed, `VITE_MAP_TILE_URL` in `.env.local` — no code changes.
 - On phones the homepage map doesn't capture swipes, so the page still scrolls; the full church page map pans normally.
 
-## 6. Install as an app (PWA)
+## 6. Homepage event banner
+
+**Administration → Homepage banner → New banner**: event name, start (the countdown runs to it), optional end,
+venue and a link (e.g. a registration form). A live preview shows exactly what visitors will see.
+The strip appears under the homepage photo with a days/hours/minutes/seconds countdown, switches to
+"Happening now" during the event, and hides itself after the end (or one day after the start if no end is set).
+Untick "Show on the homepage" to keep a banner as a draft. If several are live, the soonest one is shown.
+
+## 6b. Install as an app (PWA)
 
 The production build (`npm run build && npm run preview`, or the Vercel deploy) registers a service worker:
 Android/desktop Chrome show an **Install** button (also offered inside the portal); on iPhone use *Share → Add to Home Screen*.

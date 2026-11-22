@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, useLocation, useNavigation } from "react-router";
+import { NavProgress } from "./PageLoading";
 import { Menu, X } from "lucide-react";
 import { Logo } from "./Brand";
 import { useAuth } from "../lib/auth";
@@ -27,6 +28,7 @@ function isActive(to: string, pathname: string, hash: string) {
  * Phones get a compact bar (crest · Join · menu) — links live in a full-screen glass menu, never stacked.
  */
 export function PublicLayout() {
+  const navigation = useNavigation();
   const { me } = useAuth();
   const { pathname, hash } = useLocation();
   const [open, setOpen] = useState(false);
@@ -73,6 +75,7 @@ export function PublicLayout() {
 
   return (
     <div className="flex min-h-dvh flex-col">
+      <NavProgress active={navigation.state === "loading"} />
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[1200] focus:rounded focus:bg-white focus:px-3 focus:py-2"

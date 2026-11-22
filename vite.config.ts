@@ -1,15 +1,79 @@
-import { defineConfig } from "vite";
+import { readdirSync } from "node:fs";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+/**
+ * The public address of the site, for Google (canonical links, sitemap, sharing previews).
+ * Set VITE_SITE_URL (e.g. https://msak.or.ke). On Vercel it falls back to the production domain automatically.
+ */
+const SITE_URL = (
+  process.env.VITE_SITE_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")
+).replace(/\/$/, "");
+
+/** Puts the site address into index.html and writes sitemap.xml + robots.txt at build time. */
+function seoFiles(): Plugin {
+  const policySlugs = readdirSync("src/data/policies")
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => f.replace(/\.json$/, ""));
+  const pages = [
+    { path: "/", priority: "1.0", freq: "weekly" },
+    { path: "/churches", priority: "0.9", freq: "weekly" },
+    { path: "/register", priority: "0.8", freq: "monthly" },
+    { path: "/policies", priority: "0.4", freq: "yearly" },
+    ...policySlugs.map((slug) => ({ path: `/policies/${slug}`, priority: "0.3", freq: "yearly" })),
+  ];
+  return {
+    name: "msak-seo-files",
+    transformIndexHtml: (html) => html.replaceAll("__SITE_URL__", SITE_URL),
+    generateBundle() {
+      const today = new Date().toISOString().slice(0, 10);
+      const robots = ["User-agent: *", "Allow: /", "Disallow: /app", "Disallow: /login", "Disallow: /forgot-password", "Disallow: /reset-password"];
+      if (SITE_URL) {
+        robots.push("", `Sitemap: ${SITE_URL}/sitemap.xml`);
+        const urls = pages
+          .map((p) => `  <url><loc>${SITE_URL}${p.path}</loc><lastmod>${today}</lastmod><changefreq>${p.freq}</changefreq><priority>${p.priority}</priority></url>`)
+          .join("\n");
+        this.emitFile({
+          type: "asset",
+          fileName: "sitemap.xml",
+          source: `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`,
+        });
+      } else {
+        this.warn("VITE_SITE_URL is not set, so sitemap.xml was skipped. Set it to your site's address (e.g. https://msak.or.ke).");
+      }
+      this.emitFile({ type: "asset", fileName: "robots.txt", source: robots.join("\n") + "\n" });
+    },
+  };
+}
+
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_SITE_URL": JSON.stringify(SITE_URL),
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Libraries change rarely: separate files stay cached on phones between releases.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return "react";
+          if (id.includes("@supabase")) return "supabase";
+          if (/[\\/]node_modules[\\/](leaflet|react-leaflet|@react-leaflet)[\\/]/.test(id)) return "map";
+          return undefined;
+        },
+      },
+    },
+  },
   plugins: [
+    seoFiles(),
     react(),
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon-32.png", "favicon-64.png", "icons/apple-touch-icon.png", "brand/msak-crest-128.png"],
+      includeAssets: ["favicon-32.png", "favicon-64.png", "icons/apple-touch-icon.png", "brand/msak-crest-128.webp"],
       manifest: {
         name: "MSAK — Messianic Students Association of Kenya",
         short_name: "MSAK",
@@ -35,9 +99,16 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ["**/*.{js,css,html,png,jpg,svg,woff2}"],
+        navigateFallbackDenylist: [/^\/api\//, /^\/sitemap\.xml$/, /^\/robots\.txt$/],
+        // App files + small images for offline use. Large photos are cached when first viewed (below).
+        globPatterns: ["**/*.{js,css,html,svg,woff2}", "favicon-*.png", "icons/*.png", "brand/*.webp", "photos/*-640.webp"],
         runtimeCaching: [
+          {
+            // Site photos (large sizes, old JPEG copies): keep after the first view
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith("/photos/"),
+            handler: "CacheFirst",
+            options: { cacheName: "photos", expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 90 } },
+          },
           {
             // Google Fonts
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,

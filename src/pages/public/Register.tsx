@@ -6,6 +6,7 @@ import { useAuth } from "../../lib/auth";
 import { makeLookup } from "../../lib/directory";
 import type { Gender, LeaderLevel } from "../../lib/types";
 import { Alert, SelectInput, Spinner, TextInput } from "../../components/ui";
+import { useSeo } from "../../lib/seo";
 
 type Form = {
   full_name: string;
@@ -57,9 +58,11 @@ export function RegisterPage() {
     accept: false,
   });
 
-  useEffect(() => {
-    document.title = "Become a member — MSAK";
-  }, []);
+  useSeo({
+    title: "Become a member",
+    description: "Join MSAK: register as a Messianic student at your university or college in Kenya and get announcements from your campus, region and the national office.",
+    path: "/register",
+  });
   useEffect(() => {
     if (me && !checkEmail) navigate("/app", { replace: true });
   }, [me, checkEmail, navigate]);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -6,12 +6,13 @@ import { makeLookup } from "../../lib/directory";
 import type { Church } from "../../lib/types";
 import { ChurchFinder } from "../../components/ChurchFinder";
 import { Alert, Spinner } from "../../components/ui";
+import { useSeo } from "../../lib/seo";
 
 /** Public church map — works without logging in. */
 export function ChurchesPage() {
   const { directory, me } = useAuth();
   const navigate = useNavigate();
-  const lookup = makeLookup(directory);
+  const lookup = useMemo(() => makeLookup(directory), [directory]);
   const [churches, setChurches] = useState<Church[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,8 +23,48 @@ export function ChurchesPage() {
       .catch((e) => setError(errorMessage(e)));
   }, []);
 
+  useSeo({
+    title: "Find a Messianic church near you",
+    description:
+      "Map of Sabbath-keeping Messianic churches across Kenya, by region: service times, contacts and directions to fellowships near your university or college.",
+    path: "/churches",
+  });
+
+  // Structured data so Google can list these churches (name, place, map position, phone).
   useEffect(() => {
-    document.title = "Find a church — MSAK";
+    if (!churches?.length) return;
+    const el = document.createElement("script");
+    el.type = "application/ld+json";
+    el.id = "churches-ld";
+    el.text = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      name: "Messianic churches in Kenya listed by MSAK",
+      itemListElement: churches.map((c, i) => ({
+        "@type": "ListItem",
+        position: i + 1,
+        item: {
+          "@type": "Church",
+          name: `${c.name} — ${c.fellowship}`,
+          address: {
+            "@type": "PostalAddress",
+            streetAddress: c.place,
+            addressRegion: lookup.county(c.county_id)?.name,
+            addressCountry: "KE",
+          },
+          geo: { "@type": "GeoCoordinates", latitude: c.lat, longitude: c.lng },
+          ...(c.phone ? { telephone: c.phone } : {}),
+          ...(c.service_times ? { description: `Services: ${c.service_times}` } : {}),
+          hasMap: `https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=17/${c.lat}/${c.lng}`,
+        },
+      })),
+    });
+    document.getElementById("churches-ld")?.remove();
+    document.head.appendChild(el);
+    return () => el.remove();
+  }, [churches, lookup]);
+
+  useEffect(() => {
     load();
   }, [load]);
 

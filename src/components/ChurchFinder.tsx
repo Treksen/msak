@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Crosshair, Mail, MapPin, Navigation, Pencil, Phone, Plus, Search, Share2, X, Clock, ShieldCheck } from "lucide-react";
+import { Crosshair, Flag, Mail, MapPin, Navigation, Pencil, Phone, Plus, Search, Share2, X, Clock, ShieldCheck } from "lucide-react";
+import { formatDate } from "../lib/format";
 import type { Church } from "../lib/types";
 import type { Lookup } from "../lib/directory";
 import { directionsUrl, distanceKm, formatKm, getCurrentPosition, type LatLng } from "../lib/geo";
@@ -15,10 +16,12 @@ type Props = {
   addLabel?: string;
   canEdit?: (c: Church) => boolean;
   onEdit?: (c: Church) => void;
+  /** Signed-in members can tell leaders a church's details are wrong. */
+  onReport?: (c: Church) => void;
 };
 
 /** List + map + filters + "Near me". Used on the public page and inside the portal. */
-export function ChurchFinder({ churches, lookup, header, onAdd, addLabel = "Add a church", canEdit, onEdit }: Props) {
+export function ChurchFinder({ churches, lookup, header, onAdd, addLabel = "Add a church", canEdit, onEdit, onReport }: Props) {
   const [assoc, setAssoc] = useState<number | "all">("all");
   const [query, setQuery] = useState("");
   const [me, setMe] = useState<LatLng | null>(null);
@@ -123,6 +126,7 @@ export function ChurchFinder({ churches, lookup, header, onAdd, addLabel = "Add 
                 lookup={lookup}
                 onClose={() => setSelectedId(null)}
                 onEdit={canEdit?.(selected.c) ? () => onEdit?.(selected.c) : undefined}
+                onReport={onReport && selected.c.status === "published" ? () => onReport(selected.c) : undefined}
               />
             </div>
           )}
@@ -141,6 +145,7 @@ export function ChurchFinder({ churches, lookup, header, onAdd, addLabel = "Add 
                 lookup={lookup}
                 onClose={() => setSelectedId(null)}
                 onEdit={canEdit?.(selected.c) ? () => onEdit?.(selected.c) : undefined}
+                onReport={onReport && selected.c.status === "published" ? () => onReport(selected.c) : undefined}
               />
             </div>
           )}
@@ -203,12 +208,14 @@ export function ChurchDetail({
   lookup,
   onClose,
   onEdit,
+  onReport,
 }: {
   church: Church;
   distance: number | null;
   lookup: Lookup;
   onClose: () => void;
   onEdit?: () => void;
+  onReport?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   async function share() {
@@ -236,6 +243,9 @@ export function ChurchDetail({
           <X className="size-5" aria-hidden="true" />
         </button>
       </div>
+      {church.photo_url && (
+        <img src={church.photo_url} alt={`${church.name} building`} loading="lazy" className="mt-3 h-40 w-full rounded-md object-cover" />
+      )}
       <ul className="mt-3 space-y-2 text-sm text-body">
         <li className="flex gap-2">
           <MapPin className="mt-0.5 size-4 flex-none text-gold-700" aria-hidden="true" />
@@ -270,7 +280,9 @@ export function ChurchDetail({
         )}
         <li className="flex gap-2 text-[13px] text-muted">
           <ShieldCheck className="mt-0.5 size-4 flex-none" aria-hidden="true" />
-          {church.location_verified ? "Pin confirmed on site by a leader" : "Pin position not yet confirmed on site"}
+          {church.location_verified
+            ? `Pin confirmed on site by a leader${church.verified_at ? ` · ${formatDate(church.verified_at)}` : ""}`
+            : "Pin position not yet confirmed on site"}
         </li>
       </ul>
       {church.notes && church.status !== "published" && <p className="mt-3 rounded-md bg-gold-50 p-3 text-[13px] text-gold-800">{church.notes}</p>}
@@ -293,6 +305,12 @@ export function ChurchDetail({
           <button type="button" className="btn btn-gold btn-sm" onClick={onEdit}>
             <Pencil className="size-4" aria-hidden="true" />
             {church.status === "suggested" ? "Review" : "Edit"}
+          </button>
+        )}
+        {onReport && !onEdit && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onReport}>
+            <Flag className="size-4" aria-hidden="true" />
+            Report wrong info
           </button>
         )}
       </div>

@@ -1,51 +1,52 @@
+import type { ComponentType } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import { AuthProvider } from "./lib/auth";
 import { PublicLayout } from "./components/PublicLayout";
-import { PortalLayout } from "./components/PortalLayout";
+import { RouteError } from "./components/RouteError";
+import { PageLoading } from "./components/PageLoading";
 import { HomePage } from "./pages/public/Home";
-import { ChurchesPage } from "./pages/public/Churches";
-import { PoliciesPage, PolicyPage } from "./pages/public/Policies";
-import { LoginPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/public/AuthPages";
-import { RegisterPage } from "./pages/public/Register";
-import { NotFoundPage } from "./pages/public/NotFound";
-import { OverviewPage } from "./pages/portal/Overview";
-import { AnnouncementsPage } from "./pages/portal/AnnouncementsPage";
-import { ChurchesPortalPage } from "./pages/portal/ChurchesPortal";
-import { DocumentsPage } from "./pages/portal/Documents";
-import { ProfilePage } from "./pages/portal/Profile";
-import { FeedbackPage } from "./pages/portal/Feedback";
-import { LeadersPage } from "./pages/portal/Leaders";
-import { MembersPage } from "./pages/portal/Members";
-import { AdminPage } from "./pages/portal/Admin";
+
+/**
+ * Only the home page is in the first download. Every other page is fetched when someone opens it,
+ * so phones load the site faster. (The installed app keeps them all for offline use.)
+ */
+const page =
+  <M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string) =>
+  async () => ({ Component: (await load())[name] as ComponentType });
 
 const router = createBrowserRouter([
   {
     element: <PublicLayout />,
+    errorElement: <RouteError />,
+    hydrateFallbackElement: <PageLoading />,
     children: [
       { path: "/", element: <HomePage /> },
-      { path: "/churches", element: <ChurchesPage /> },
-      { path: "/policies", element: <PoliciesPage /> },
-      { path: "/policies/:slug", element: <PolicyPage /> },
-      { path: "/login", element: <LoginPage /> },
-      { path: "/register", element: <RegisterPage /> },
-      { path: "/forgot-password", element: <ForgotPasswordPage /> },
-      { path: "/reset-password", element: <ResetPasswordPage /> },
-      { path: "*", element: <NotFoundPage /> },
+      { path: "/churches", lazy: page(() => import("./pages/public/Churches"), "ChurchesPage") },
+      { path: "/policies", lazy: page(() => import("./pages/public/Policies"), "PoliciesPage") },
+      { path: "/policies/:slug", lazy: page(() => import("./pages/public/Policies"), "PolicyPage") },
+      { path: "/login", lazy: page(() => import("./pages/public/AuthPages"), "LoginPage") },
+      { path: "/register", lazy: page(() => import("./pages/public/Register"), "RegisterPage") },
+      { path: "/forgot-password", lazy: page(() => import("./pages/public/AuthPages"), "ForgotPasswordPage") },
+      { path: "/reset-password", lazy: page(() => import("./pages/public/AuthPages"), "ResetPasswordPage") },
+      { path: "*", lazy: page(() => import("./pages/public/NotFound"), "NotFoundPage") },
     ],
   },
   {
     path: "/app",
-    element: <PortalLayout />,
+    lazy: page(() => import("./components/PortalLayout"), "PortalLayout"),
+    errorElement: <RouteError />,
+    hydrateFallbackElement: <PageLoading />,
     children: [
-      { index: true, element: <OverviewPage /> },
-      { path: "announcements", element: <AnnouncementsPage /> },
-      { path: "churches", element: <ChurchesPortalPage /> },
-      { path: "documents", element: <DocumentsPage /> },
-      { path: "profile", element: <ProfilePage /> },
-      { path: "feedback", element: <FeedbackPage /> },
-      { path: "leaders", element: <LeadersPage /> },
-      { path: "members", element: <MembersPage /> },
-      { path: "admin", element: <AdminPage /> },
+      { index: true, lazy: page(() => import("./pages/portal/Overview"), "OverviewPage") },
+      { path: "announcements", lazy: page(() => import("./pages/portal/AnnouncementsPage"), "AnnouncementsPage") },
+      { path: "churches", lazy: page(() => import("./pages/portal/ChurchesPortal"), "ChurchesPortalPage") },
+      { path: "documents", lazy: page(() => import("./pages/portal/Documents"), "DocumentsPage") },
+      { path: "profile", lazy: page(() => import("./pages/portal/Profile"), "ProfilePage") },
+      { path: "feedback", lazy: page(() => import("./pages/portal/Feedback"), "FeedbackPage") },
+      { path: "leaders", lazy: page(() => import("./pages/portal/Leaders"), "LeadersPage") },
+      { path: "members", lazy: page(() => import("./pages/portal/Members"), "MembersPage") },
+      { path: "admin", lazy: page(() => import("./pages/portal/Admin"), "AdminPage") },
+      { path: "admin/logs", lazy: page(() => import("./pages/portal/AdminLogs"), "AdminLogsPage") },
     ],
   },
 ]);

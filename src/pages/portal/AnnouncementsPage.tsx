@@ -13,6 +13,7 @@ const filters: { id: "all" | Audience; label: string }[] = [
   { id: "institutional", label: "Campus" },
   { id: "regional", label: "Region" },
   { id: "national", label: "National" },
+  { id: "alumni", label: "Alumni" },
 ];
 
 export function AnnouncementsPage() {
@@ -56,7 +57,7 @@ export function AnnouncementsPage() {
       </PageHeader>
 
       <div role="tablist" aria-label="Filter announcements" className="mb-4 inline-flex gap-1 rounded-md bg-[#f1eee5] p-1">
-        {filters.map((f) => (
+        {filters.filter((f) => f.id === "all" || (items ?? []).some((a) => a.audience === f.id)).map((f) => (
           <button
             key={f.id}
             type="button"

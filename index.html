@@ -6,8 +6,10 @@
     <title>MSAK — Messianic Students Association of Kenya</title>
     <meta
       name="description"
-      content="Grounded in Truth. United in Faith. MSAK connects, disciples and equips Messianic students across Kenya — find your association and a local church near you."
+      content="MSAK connects, disciples and equips Messianic students in universities and colleges across Kenya. Find your regional association, join as a member, and find a Sabbath-keeping church near your campus."
     />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="__SITE_URL__/" />
     <meta name="theme-color" content="#0B1F4D" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png" />
@@ -15,10 +17,53 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MSAK" />
-    <meta property="og:title" content="MSAK — Messianic Students Association of Kenya" />
-    <meta property="og:description" content="Grounded in Truth. United in Faith." />
-    <meta property="og:image" content="/photos/photo-0058.jpg" />
+
+    <!-- Sharing previews (WhatsApp, Facebook, X, LinkedIn) -->
+    <meta property="og:site_name" content="MSAK" />
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_KE" />
+    <meta property="og:title" content="MSAK — Messianic Students Association of Kenya" />
+    <meta property="og:description" content="Grounded in Truth. United in Faith. Messianic students in universities and colleges across Kenya." />
+    <meta property="og:url" content="__SITE_URL__/" />
+    <meta property="og:image" content="__SITE_URL__/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The MSAK crest beside the words Messianic Students Association of Kenya" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MSAK — Messianic Students Association of Kenya" />
+    <meta name="twitter:description" content="Grounded in Truth. United in Faith." />
+    <meta name="twitter:image" content="__SITE_URL__/og-image.jpg" />
+
+    <!-- What Google knows about MSAK (structured data) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "__SITE_URL__/#organization",
+            "name": "Messianic Students Association of Kenya",
+            "alternateName": "MSAK",
+            "url": "__SITE_URL__/",
+            "logo": "__SITE_URL__/brand/msak-crest-400.png",
+            "image": "__SITE_URL__/og-image.jpg",
+            "slogan": "Grounded in Truth. United in Faith.",
+            "description": "A national association of Messianic students in Kenyan universities and colleges, organised in regional associations, that connects, disciples and equips students and helps them find local Sabbath-keeping churches.",
+            "areaServed": { "@type": "Country", "name": "Kenya" },
+            "knowsLanguage": ["en", "sw"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "__SITE_URL__/#website",
+            "url": "__SITE_URL__/",
+            "name": "MSAK",
+            "inLanguage": "en-KE",
+            "publisher": { "@id": "__SITE_URL__/#organization" }
+          }
+        ]
+      }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -28,6 +73,21 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main style="max-width: 640px; margin: 48px auto; padding: 0 20px; font-family: system-ui, sans-serif; color: #141b2d">
+        <h1>MSAK — Messianic Students Association of Kenya</h1>
+        <p>Grounded in Truth. United in Faith.</p>
+        <p>
+          MSAK connects, disciples and equips Messianic students in universities and colleges across Kenya, through regional
+          associations. Members get announcements from their campus, region and the national office, and can find a
+          Sabbath-keeping church near their campus.
+        </p>
+        <p>
+          <a href="/churches">Find a church</a> · <a href="/register">Become a member</a> · <a href="/policies">Policies</a>
+        </p>
+        <p>Please turn on JavaScript to use the full site and the members' portal.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

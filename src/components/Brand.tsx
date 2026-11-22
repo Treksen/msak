@@ -16,7 +16,7 @@ export function Logo({
 }) {
   return (
     <Link to={to} className={`flex min-w-0 items-center gap-2.5 no-underline sm:gap-3 ${light ? "text-white" : "text-navy-900"}`}>
-      <img src="/brand/msak-crest-128.png" alt="" width={size} height={size} className="flex-none" style={{ width: size, height: size }} />
+      <img src="/brand/msak-crest-128.webp" alt="" width={size} height={size} className="flex-none" style={{ width: size, height: size }} />
       {wordmark && (
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="font-serif text-lg font-bold tracking-[0.05em] sm:text-[22px]">MSAK</span>

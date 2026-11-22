@@ -2,10 +2,17 @@ import type {
   Announcement,
   Church,
   ChurchInput,
+  ChurchReport,
+  AdminDashboard,
+  AuditEntry,
+  ErrorEntry,
+  ClientErrorReport,
   DemoPersona,
   Directory,
   DocumentItem,
   FeedbackItem,
+  HomeBanner,
+  HomeBannerInput,
   LeaderLevel,
   LeaderRoleWithPerson,
   Me,
@@ -48,6 +55,8 @@ export interface Api {
   listLeaderRoles(): Promise<LeaderRoleWithPerson[]>;
   reviewLeaderRole(id: string, approve: boolean, note?: string): Promise<void>;
   revokeLeaderRole(id: string, note?: string): Promise<void>;
+  /** Ask to renew one of your roles for the next academic year (needs approval again). */
+  renewLeaderRole(id: string): Promise<void>;
 
   listAnnouncements(): Promise<Announcement[]>;
   postAnnouncement(input: NewAnnouncement): Promise<void>;
@@ -56,6 +65,12 @@ export interface Api {
   listChurches(): Promise<Church[]>;
   saveChurch(input: ChurchInput, id?: string): Promise<void>;
   deleteChurch(id: string): Promise<void>;
+  /** Upload a church photo (already resized) and get its public https URL. */
+  uploadChurchPhoto(file: Blob, associationId: number): Promise<string>;
+  reportChurch(churchId: string, message: string): Promise<void>;
+  /** Your own reports, plus every report for churches you manage. */
+  listChurchReports(): Promise<ChurchReport[]>;
+  resolveChurchReport(id: string): Promise<void>;
 
   listDocuments(): Promise<DocumentItem[]>;
   uploadDocument(file: File, title: string, description: string): Promise<void>;
@@ -68,6 +83,24 @@ export interface Api {
   listMembers(): Promise<MemberRow[]>;
   setAdmin(userId: string, isAdmin: boolean): Promise<void>;
   addInstitution(countyId: number, name: string): Promise<void>;
+
+  // Admin dashboard and logs (admins only, except logClientError)
+  adminDashboard(): Promise<AdminDashboard>;
+  /** Newest first, 50 at a time; pass the last id you have as `before` to load older entries. */
+  listAuditLog(opts?: { before?: number; entity?: string }): Promise<AuditEntry[]>;
+  listErrorLog(opts?: { before?: number }): Promise<ErrorEntry[]>;
+  deleteErrorEntry(id: number): Promise<void>;
+  /** Delete activity and error entries older than `days` (at least 7). Returns how many were removed. */
+  purgeLogs(days: number): Promise<number>;
+  /** Anyone (even signed out) can report an app error. Never throws. */
+  logClientError(report: ClientErrorReport): Promise<void>;
+
+  /** Live banners for the homepage (anyone, logged in or not). */
+  listLiveBanners(): Promise<HomeBanner[]>;
+  /** Every banner, including hidden and past ones (administrators). */
+  listAllBanners(): Promise<HomeBanner[]>;
+  saveBanner(input: HomeBannerInput, id?: string): Promise<void>;
+  deleteBanner(id: string): Promise<void>;
 }
 
 export const api: Api = supabase ? createSupabaseApi(supabase) : createDemoApi();

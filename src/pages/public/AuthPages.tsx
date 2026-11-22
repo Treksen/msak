@@ -4,12 +4,14 @@ import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import type { DemoPersona } from "../../lib/types";
 import { Alert, TextInput } from "../../components/ui";
+import { Photo } from "../../components/Photo";
+import { useSeo } from "../../lib/seo";
 
 function AuthShell({ title, intro, children }: { title: string; intro?: ReactNode; children: ReactNode }) {
   return (
     <div className="grid min-h-[calc(100dvh-140px)] lg:grid-cols-2">
       <div className="relative hidden lg:block">
-        <img src="/photos/photo-0046.jpg" alt="" className="absolute inset-0 size-full object-cover" />
+        <Photo src="/photos/photo-0046" alt="" sizes="50vw" className="absolute inset-0 size-full object-cover" />
         <div className="absolute inset-x-0 bottom-0 bg-navy-900/90 p-10 text-white">
           <p className="font-serif text-3xl font-semibold leading-tight">Grounded in Truth. United in Faith.</p>
           <p className="mt-2 font-serif italic text-gold-300">Faith for campus. Purpose for life.</p>
@@ -42,9 +44,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    document.title = "Log in — MSAK";
-  }, []);
+  useSeo({ title: "Log in", description: "Log in to the MSAK members' portal.", noindex: true });
   useEffect(() => {
     if (me) navigate(next.startsWith("/") ? next : "/app", { replace: true });
   }, [me, navigate, next]);
@@ -118,6 +118,7 @@ export function LoginPage() {
 }
 
 export function ForgotPasswordPage() {
+  useSeo({ title: "Reset your password", noindex: true });
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -158,6 +159,7 @@ export function ForgotPasswordPage() {
 }
 
 export function ResetPasswordPage() {
+  useSeo({ title: "Choose a new password", noindex: true });
   const { me } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);

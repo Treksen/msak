@@ -1,10 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Api } from "./api";
+import { isBannerLive } from "./banners";
 import type {
   Announcement,
   Church,
+  ChurchReport,
+  AdminDashboard,
+  AuditEntry,
+  ErrorEntry,
   DocumentItem,
   FeedbackItem,
+  HomeBanner,
   LeaderRole,
   LeaderRoleWithPerson,
   MemberRow,
@@ -128,6 +134,10 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
       check(await sb.rpc("revoke_leader_role", { p_role_id: id, p_note: note ?? null }));
     },
 
+    async renewLeaderRole(id) {
+      check(await sb.rpc("renew_leader_role", { p_role_id: id }));
+    },
+
     async listAnnouncements() {
       const rows = check(await sb.from("announcements").select("*").order("created_at", { ascending: false }).limit(200));
       return (rows ?? []) as Announcement[];
@@ -161,6 +171,58 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
 
     async deleteChurch(id) {
       check(await sb.from("churches").delete().eq("id", id));
+    },
+
+    async uploadChurchPhoto(file, associationId) {
+      const path = `${associationId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      check(await sb.storage.from("church-photos").upload(path, file, { contentType: "image/jpeg", upsert: false }));
+      return sb.storage.from("church-photos").getPublicUrl(path).data.publicUrl;
+    },
+
+    async reportChurch(churchId, message) {
+      check(await sb.from("church_reports").insert({ church_id: churchId, message: message.trim() }));
+    },
+
+    async listChurchReports() {
+      const rows = check(await sb.from("church_reports").select("*").order("created_at", { ascending: false }).limit(300));
+      return (rows ?? []) as ChurchReport[];
+    },
+
+    async resolveChurchReport(id) {
+      check(await sb.from("church_reports").update({ status: "resolved" }).eq("id", id));
+    },
+
+    async adminDashboard() {
+      return check(await sb.rpc("admin_dashboard")) as AdminDashboard;
+    },
+
+    async listAuditLog(opts = {}) {
+      let q = sb.from("audit_log").select("*").order("id", { ascending: false }).limit(50);
+      if (opts.before) q = q.lt("id", opts.before);
+      if (opts.entity) q = q.eq("entity", opts.entity);
+      return (check(await q) ?? []) as AuditEntry[];
+    },
+
+    async listErrorLog(opts = {}) {
+      let q = sb.from("error_log").select("*").order("id", { ascending: false }).limit(50);
+      if (opts.before) q = q.lt("id", opts.before);
+      return (check(await q) ?? []) as ErrorEntry[];
+    },
+
+    async deleteErrorEntry(id) {
+      check(await sb.from("error_log").delete().eq("id", id));
+    },
+
+    async purgeLogs(days) {
+      return Number(check(await sb.rpc("purge_logs", { p_days: days })) ?? 0);
+    },
+
+    async logClientError(r) {
+      try {
+        await sb.rpc("log_client_error", { p_message: r.message, p_stack: r.stack ?? null, p_url: r.url, p_user_agent: r.userAgent });
+      } catch {
+        /* reporting must never cause another error */
+      }
     },
 
     async listDocuments() {
@@ -228,6 +290,26 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
 
     async addInstitution(countyId, name) {
       check(await sb.from("institutions").insert({ county_id: countyId, name: name.trim() }));
+    },
+
+    async listLiveBanners() {
+      const rows = (check(await sb.from("home_banners").select("*").order("starts_at")) ?? []) as HomeBanner[];
+      // Admins can read hidden/past banners too, so apply the public rule here as well.
+      return rows.filter((b) => isBannerLive(b));
+    },
+
+    async listAllBanners() {
+      const rows = check(await sb.from("home_banners").select("*").order("starts_at", { ascending: false }));
+      return (rows ?? []) as HomeBanner[];
+    },
+
+    async saveBanner(input, id) {
+      if (id) check(await sb.from("home_banners").update(input).eq("id", id));
+      else check(await sb.from("home_banners").insert(input));
+    },
+
+    async deleteBanner(id) {
+      check(await sb.from("home_banners").delete().eq("id", id));
     },
   };
 }

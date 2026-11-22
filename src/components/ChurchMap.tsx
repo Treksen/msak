@@ -8,8 +8,8 @@ import { KENYA_BOUNDS, type LatLng } from "../lib/geo";
 
 /* ---------------------------------------------------------------------------
    Base maps
-   - Satellite (default): Esri World Imagery + Esri place/road labels on top.
-   - Map: OpenStreetMap street map.
+   - Map (default): OpenStreetMap street map.
+   - Satellite: Esri World Imagery + Esri place/road labels on top.
    Both can be swapped through .env (see .env.example), e.g. for MapTiler.
 --------------------------------------------------------------------------- */
 const env = import.meta.env as Record<string, string | undefined>;
@@ -30,15 +30,15 @@ const SATELLITE = {
 };
 
 export type BaseLayer = "satellite" | "street";
-const LAYER_KEY = "msak-map-layer";
+const LAYER_KEY = "msak-map-layer-v2";
 
-/** Remembers the member's choice; satellite by default. */
+/** Remembers the member's choice; street map by default. */
 function useBaseLayer(): [BaseLayer, (l: BaseLayer) => void] {
   const [layer, setLayer] = useState<BaseLayer>(() => {
     try {
-      return localStorage.getItem(LAYER_KEY) === "street" ? "street" : "satellite";
+      return localStorage.getItem(LAYER_KEY) === "satellite" ? "satellite" : "street";
     } catch {
-      return "satellite";
+      return "street";
     }
   });
   const set = (l: BaseLayer) => {
@@ -52,18 +52,22 @@ function useBaseLayer(): [BaseLayer, (l: BaseLayer) => void] {
   return [layer, set];
 }
 
+function EsriSatellite() {
+  return (
+    <>
+      <TileLayer key="sat" url={SATELLITE.url} attribution={SATELLITE.attribution} maxNativeZoom={19} maxZoom={20} />
+      {SATELLITE.labels.map((u) => (
+        <TileLayer key={u} url={u} maxNativeZoom={18} maxZoom={20} attribution="Labels &copy; Esri" />
+      ))}
+    </>
+  );
+}
+
 function BaseTiles({ layer }: { layer: BaseLayer }) {
   if (layer === "street") {
     return <TileLayer key="street" url={STREET.url} attribution={STREET.attribution} maxZoom={19} />;
   }
-  return (
-    <>
-      <TileLayer key="sat" url={SATELLITE.url} attribution={SATELLITE.attribution} maxNativeZoom={18} maxZoom={19} />
-      {SATELLITE.labels.map((u) => (
-        <TileLayer key={u} url={u} maxNativeZoom={18} maxZoom={19} attribution="Labels &copy; Esri" />
-      ))}
-    </>
-  );
+  return <EsriSatellite />;
 }
 
 /** Satellite / Map switch drawn over the map. */
@@ -102,6 +106,76 @@ function pinIcon(kind: "default" | "selected" | "suggested") {
   });
 }
 const icons = { default: pinIcon("default"), selected: pinIcon("selected"), suggested: pinIcon("suggested") };
+const clusterIcons = new Map<number, L.DivIcon>();
+function clusterIcon(n: number) {
+  let icon = clusterIcons.get(n);
+  if (!icon) {
+    const size = n < 10 ? 40 : n < 50 ? 46 : 54;
+    icon = L.divIcon({ className: "msak-cluster", html: `<span>${n}</span>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+    clusterIcons.set(n, icon);
+  }
+  return icon;
+}
+
+/**
+ * Pins that are close together on screen merge into a numbered circle; tap it to zoom in.
+ * From street level (zoom 15+) every church shows on its own. The selected church is never hidden in a group.
+ */
+function ClusteredMarkers({ churches, selectedId, onSelect }: { churches: Church[]; selectedId?: string | null; onSelect?: (id: string) => void }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+
+  const groups = useMemo(() => {
+    if (zoom >= 15) return churches.map((c) => [c]);
+    const cell = 64;
+    const cells = new Map<string, Church[]>();
+    for (const c of churches) {
+      const pt = map.project([c.lat, c.lng], zoom);
+      const key = `${Math.floor(pt.x / cell)}:${Math.floor(pt.y / cell)}`;
+      const list = cells.get(key);
+      if (list) list.push(c);
+      else cells.set(key, [c]);
+    }
+    return [...cells.values()];
+  }, [churches, zoom, map]);
+
+  return (
+    <>
+      {groups.flatMap((g) => {
+        if (g.length === 1 || g.some((c) => c.id === selectedId)) {
+          return g.map((c) => (
+            <Marker
+              key={c.id}
+              position={[c.lat, c.lng]}
+              icon={c.id === selectedId ? icons.selected : c.status === "suggested" ? icons.suggested : icons.default}
+              title={c.name}
+              alt={c.name}
+              keyboard
+              zIndexOffset={c.id === selectedId ? 1000 : 0}
+              eventHandlers={{ click: () => onSelect?.(c.id) }}
+            />
+          ));
+        }
+        const lat = g.reduce((a, c) => a + c.lat, 0) / g.length;
+        const lng = g.reduce((a, c) => a + c.lng, 0) / g.length;
+        const bounds = L.latLngBounds(g.map((c) => [c.lat, c.lng] as [number, number]));
+        return [
+          <Marker
+            key={`cluster-${g[0].id}-${g.length}`}
+            position={[lat, lng]}
+            icon={clusterIcon(g.length)}
+            title={`${g.length} churches — zoom in`}
+            alt={`${g.length} churches`}
+            keyboard
+            eventHandlers={{ click: () => map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 }) }}
+          />,
+        ];
+      })}
+    </>
+  );
+}
+
 const meIcon = L.divIcon({ className: "", html: '<div class="msak-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
 
 /** Re-fit the view whenever `fitKey` changes. */
@@ -167,7 +241,7 @@ type Props = {
   wheelZoom?: boolean;
 };
 
-/** The church map: satellite by default, switchable to the street map. */
+/** The church map: street map by default, switchable to satellite. */
 export function ChurchMap({ churches, selectedId, onSelect, me, fitKey, className, wheelZoom = true }: Props) {
   const [layer, setLayer] = useBaseLayer();
   const points = useMemo(() => churches.map((c) => ({ lat: c.lat, lng: c.lng })), [churches]);
@@ -185,18 +259,7 @@ export function ChurchMap({ churches, selectedId, onSelect, me, fitKey, classNam
         <BaseTiles layer={layer} />
         <Remeasure />
         <FitTo points={me ? [...points, me] : points} fitKey={fitKey} focus={selected} />
-        {churches.map((c) => (
-          <Marker
-            key={c.id}
-            position={[c.lat, c.lng]}
-            icon={c.id === selectedId ? icons.selected : c.status === "suggested" ? icons.suggested : icons.default}
-            title={c.name}
-            alt={c.name}
-            keyboard
-            zIndexOffset={c.id === selectedId ? 1000 : 0}
-            eventHandlers={{ click: () => onSelect?.(c.id) }}
-          />
-        ))}
+        <ClusteredMarkers churches={churches} selectedId={selectedId} onSelect={onSelect} />
         {me && <Marker position={[me.lat, me.lng]} icon={meIcon} title="You are here" alt="You are here" interactive={false} />}
       </MapContainer>
       <LayerSwitch layer={layer} onChange={setLayer} />

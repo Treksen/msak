@@ -10,6 +10,7 @@ import type { Announcement, Church, LeaderRoleWithPerson } from "../../lib/types
 import { AnnouncementItem } from "../../components/Announcements";
 import { InstallPrompt } from "../../components/InstallPrompt";
 import { Alert, EmptyState, StatusBadge } from "../../components/ui";
+import { isAlumni, roleState } from "../../lib/academic";
 
 export function OverviewPage() {
   const me = useMe();
@@ -22,8 +23,10 @@ export function OverviewPage() {
 
   const profile = me.profile;
   const assoc = lookup.associationOfInstitution(profile?.institution_id);
-  const approved = me.roles.filter((r) => r.status === "approved");
+  const approved = me.roles.filter((r) => roleState(r) === "active" || roleState(r) === "renewal");
   const pendingMine = me.roles.filter((r) => r.status === "pending");
+  const expiredMine = me.roles.filter((r) => roleState(r) === "expired");
+  const alumni = isAlumni(profile);
 
   useEffect(() => {
     document.title = "Overview — MSAK";
@@ -44,7 +47,7 @@ export function OverviewPage() {
     }
   }
 
-  const pendingRequests = requests.filter((r) => r.status === "pending");
+  const pendingRequests = requests.filter((r) => ["pending", "renewal"].includes(roleState(r)));
   const myScopeChurches = churches.filter((c) => c.association_id === assoc?.id);
   const suggestions = churches.filter((c) => c.status === "suggested" && perms.canManageChurchesIn(c.association_id));
 
@@ -63,6 +66,24 @@ export function OverviewPage() {
         )}
       </div>
 
+      {expiredMine.length > 0 && (
+        <Alert tone="warn">
+          Your {expiredMine.map((r) => `${levelLabel[r.level].toLowerCase()} ${r.position}`).join(" and ")} role ended on 31 August.{" "}
+          <Link to="/app/profile" className="font-semibold">
+            Renew it for this year
+          </Link>{" "}
+          to post again — your approver will confirm it.
+        </Alert>
+      )}
+      {alumni && (
+        <Alert tone="info">
+          You're now alumni. You'll get national, regional and alumni announcements. Still studying?{" "}
+          <Link to="/app/profile" className="font-semibold">
+            Update your completion year
+          </Link>
+          .
+        </Alert>
+      )}
       {!profile && !me.isAdmin && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -134,7 +155,9 @@ export function OverviewPage() {
           ) : (
           <section aria-label="Membership" className="flex flex-col gap-3 rounded-lg border-t-[3px] border-gold-500 bg-navy-900 p-5 text-white">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold-300">Member · {assoc?.code}</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold-300">
+                {alumni ? `Alumni · class of ${profile?.expected_completion_year}` : `Member · ${assoc?.code ?? ""}`}
+              </span>
               {(me.isAdmin || approved.length > 0) && (
                 <span className="rounded-full bg-navy-700 px-2.5 py-1 text-xs font-semibold">
                   {me.isAdmin ? "Administrator" : approved.map((r) => `${levelLabel[r.level]} leader`).join(" · ")}

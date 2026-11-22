@@ -39,6 +39,7 @@ export const audienceLabel: Record<string, string> = {
   institutional: "Campus",
   regional: "Region",
   national: "National",
+  alumni: "Alumni",
 };
 
 /** Download rows as a CSV file (opens in Excel / Google Sheets). */

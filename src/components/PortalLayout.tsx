@@ -1,5 +1,6 @@
 import { useEffect, useState, type ComponentType } from "react";
-import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router";
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useNavigation } from "react-router";
+import { NavProgress } from "./PageLoading";
 import {
   BadgeCheck,
   FileText,
@@ -20,15 +21,19 @@ import { makeLookup } from "../lib/directory";
 import { initials } from "../lib/format";
 import { DemoBanner } from "./DemoBanner";
 import { Spinner } from "./ui";
+import { isRoleActive, roleState } from "../lib/academic";
+import { useNoIndex } from "../lib/seo";
 
 type Item = { to: string; label: string; icon: ComponentType<{ className?: string }>; end?: boolean; badge?: number };
 
 /** Portal shell: navy sidebar on desktop, bottom tab bar + "More" sheet on phones. */
 export function PortalLayout() {
+  const navigation = useNavigation();
   const { me, directory } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
+  useNoIndex();
   const [pending, setPending] = useState(0);
 
   const lookup = makeLookup(directory);
@@ -40,7 +45,7 @@ export function PortalLayout() {
     if (!me || !perms.canReviewLeaders) return;
     api
       .listLeaderRoles()
-      .then((rows) => setPending(rows.filter((r) => r.status === "pending").length))
+      .then((rows) => setPending(rows.filter((r) => ["pending", "renewal"].includes(roleState(r))).length))
       .catch(() => setPending(0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, location.pathname]);
@@ -66,8 +71,8 @@ export function PortalLayout() {
     ? me.profile
       ? "Administrator"
       : me.email ?? "Administrator"
-    : me.roles.find((r) => r.status === "approved")
-      ? `${me.roles.find((r) => r.status === "approved")!.position} · ${myAssoc?.code ?? ""}`
+    : me.roles.find(isRoleActive)
+      ? `${me.roles.find(isRoleActive)!.position} · ${myAssoc?.code ?? ""}`
       : `Member · ${myAssoc?.code ?? ""}`;
 
   async function logout() {
@@ -101,7 +106,7 @@ export function PortalLayout() {
   const Sidebar = (
     <div className="flex h-full flex-col gap-6 px-4 py-5">
       <Link to="/" className="flex items-center gap-3 px-2 text-white no-underline">
-        <img src="/brand/msak-crest-128.png" alt="" className="size-11" />
+        <img src="/brand/msak-crest-128.webp" alt="" className="size-11" />
         <span className="font-serif text-xl font-bold tracking-wide">MSAK</span>
       </Link>
       <nav aria-label="Member">
@@ -134,6 +139,7 @@ export function PortalLayout() {
   return (
     <div className="flex min-h-dvh flex-col">
       <DemoBanner />
+      <NavProgress active={navigation.state === "loading"} />
       <div className="flex flex-1">
         <aside className="sticky top-0 hidden h-dvh w-[272px] flex-none overflow-y-auto bg-navy-900 lg:block">{Sidebar}</aside>
 
@@ -141,7 +147,7 @@ export function PortalLayout() {
           {/* Phone top bar */}
           <header className="sticky top-0 z-[900] flex items-center justify-between border-b border-line bg-white px-4 py-2.5 lg:hidden">
             <Link to="/app" className="flex items-center gap-2.5 text-navy-900 no-underline">
-              <img src="/brand/msak-crest-128.png" alt="" className="size-9" />
+              <img src="/brand/msak-crest-128.webp" alt="" className="size-9" />
               <span className="font-serif text-lg font-bold tracking-wide">MSAK</span>
             </Link>
             <span className="truncate pl-3 text-xs text-muted">{roleLine}</span>

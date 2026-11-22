@@ -3,6 +3,7 @@ import { api, errorMessage } from "../../lib/api";
 import { useAuth, useMe } from "../../lib/auth";
 import { usePortal } from "../../lib/portal";
 import { formatDate, levelLabel } from "../../lib/format";
+import { canRenew, formatDay, isAlumni, roleState } from "../../lib/academic";
 import type { Gender, LeaderLevel } from "../../lib/types";
 import { Alert, PageHeader, SelectInput, StatusBadge, TextInput } from "../../components/ui";
 
@@ -55,6 +56,14 @@ export function ProfilePage() {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader title="My profile">Keep your details current so you receive the right announcements.</PageHeader>
+
+      {isAlumni(p) && (
+        <Alert tone="info">
+          <strong>You're now alumni</strong> (completion year {p.expected_completion_year}). You receive national, regional and alumni
+          announcements. Still studying — repeating a year or deferred? Update your <strong>expected completion year</strong> below and
+          you'll be a student again.
+        </Alert>
+      )}
 
       <form onSubmit={save} className="card grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
         <h2 className="font-serif text-xl font-semibold text-navy-900 sm:col-span-2">Personal details</h2>
@@ -187,12 +196,38 @@ function LeadershipSection() {
                     : r.level === "regional"
                       ? lookup.association(r.association_id)?.name
                       : "All of MSAK"}{" "}
-                  · requested {formatDate(r.requested_at)}
+                  {r.status === "approved" && r.term_ends_on
+                    ? ` · ${roleState(r) === "expired" ? "term ended" : "term ends"} ${formatDay(r.term_ends_on)}`
+                    : ` · requested ${formatDate(r.requested_at)}`}
                   {r.review_note ? ` · “${r.review_note}”` : ""}
                 </span>
+                {roleState(r) === "expired" && (
+                  <span className="mt-1 block text-[13px] font-semibold text-gold-800">
+                    Expired at the end of the academic year — renew to post again.
+                  </span>
+                )}
+                {roleState(r) === "renewal" && (
+                  <span className="mt-1 block text-[13px] text-muted">Renewal for next year is waiting for approval.</span>
+                )}
               </span>
-              <span className="flex items-center gap-2">
-                <StatusBadge status={r.status} />
+              <span className="flex flex-wrap items-center gap-2">
+                <StatusBadge status={roleState(r)} />
+                {canRenew(r) && (
+                  <button
+                    type="button"
+                    className="btn btn-gold btn-sm"
+                    onClick={async () => {
+                      try {
+                        await api.renewLeaderRole(r.id);
+                        await refresh();
+                      } catch (e) {
+                        alert(errorMessage(e));
+                      }
+                    }}
+                  >
+                    Renew for next year
+                  </button>
+                )}
                 {r.status === "approved" && (
                   <button
                     type="button"

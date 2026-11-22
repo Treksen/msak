@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { Crosshair, Trash2 } from "lucide-react";
+import { Camera, ClipboardPaste, Crosshair, Trash2, X } from "lucide-react";
 import type { Church, ChurchInput, ChurchStatus } from "../lib/types";
 import type { Lookup } from "../lib/directory";
 import { getCurrentPosition, type LatLng } from "../lib/geo";
 import { api, errorMessage } from "../lib/api";
 import { PinPicker } from "./ChurchMap";
+import { parsePosition } from "../lib/coords";
+import { resizeImage } from "../lib/image";
 import { Alert, SelectInput, TextArea, TextInput } from "./ui";
 
 type Props = {
@@ -33,6 +35,35 @@ export function ChurchForm({ lookup, manageable, defaultAssociationId, church, o
   const [verified, setVerified] = useState<boolean>(church?.location_verified ?? false);
   const [status, setStatus] = useState<ChurchStatus>(church?.status === "suggested" ? "published" : church?.status ?? "published");
   const [locating, setLocating] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(church?.photo_url ?? null);
+  const [uploading, setUploading] = useState(false);
+
+  function placePasted() {
+    const r = parsePosition(pasted);
+    if (r.ok) {
+      setPin(r.point);
+      setAccuracy(null);
+      setPasteMsg(`Pin placed at ${r.point.lat.toFixed(5)}, ${r.point.lng.toFixed(5)}.`);
+    } else {
+      setPasteMsg(r.reason);
+    }
+  }
+
+  async function choosePhoto(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const blob = await resizeImage(file);
+      setPhotoUrl(await api.uploadChurchPhoto(blob, associationId));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setUploading(false);
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,7 +107,7 @@ export function ChurchForm({ lookup, manageable, defaultAssociationId, church, o
       contact_person: text("contact_person"),
       service_times: text("service_times"),
       maps_url: text("maps_url"),
-      photo_url: church?.photo_url ?? null,
+      photo_url: isManager ? photoUrl : church?.photo_url ?? null,
       notes: text("notes"),
       status: isManager ? status : "suggested",
     };
@@ -133,6 +164,34 @@ export function ChurchForm({ lookup, manageable, defaultAssociationId, church, o
         </div>
         <p className="text-sm text-muted">Standing at the church? Use your location. Otherwise tap the map, then drag the pin to the exact spot.</p>
         <PinPicker value={pin} onChange={(p) => { setPin(p); setAccuracy(null); }} />
+        <div className="flex flex-col gap-2 rounded-md border border-line bg-paper p-3">
+          <label htmlFor="paste-pos" className="text-sm font-semibold text-navy-900">
+            Or paste coordinates / a Google Maps link
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="paste-pos"
+              className="input"
+              value={pasted}
+              onChange={(e) => {
+                setPasted(e.target.value);
+                setPasteMsg(null);
+              }}
+              placeholder="-1.1023, 37.0145  or  https://www.google.com/maps/…"
+              inputMode="text"
+              autoComplete="off"
+            />
+            <button type="button" className="btn btn-outline flex-none" onClick={placePasted} disabled={!pasted.trim()}>
+              <ClipboardPaste className="size-4" aria-hidden="true" />
+              Place pin
+            </button>
+          </div>
+          {pasteMsg && (
+            <p className="text-[13px] text-body" aria-live="polite">
+              {pasteMsg}
+            </p>
+          )}
+        </div>
         <p className="text-[13px] text-muted" aria-live="polite">
           {pin ? `Pin: ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : "No pin yet."}
           {accuracy != null && ` · accurate to about ${Math.round(accuracy)} m`}
@@ -147,6 +206,34 @@ export function ChurchForm({ lookup, manageable, defaultAssociationId, church, o
           </label>
         )}
       </section>
+
+      {isManager && (
+        <section aria-labelledby="photo-h" className="flex flex-col gap-3">
+          <h3 id="photo-h" className="font-semibold text-navy-900">
+            Photo (optional)
+          </h3>
+          {photoUrl ? (
+            <div className="relative overflow-hidden rounded-md border border-line">
+              <img src={photoUrl} alt="Church" className="h-48 w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => setPhotoUrl(null)}
+                className="absolute right-2 top-2 flex size-9 items-center justify-center rounded-full bg-white/90 text-navy-900 shadow"
+                aria-label="Remove photo"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-line-strong bg-paper px-4 py-6 text-sm font-semibold text-navy-900">
+              <Camera className="size-5 text-gold-700" aria-hidden="true" />
+              {uploading ? "Uploading…" : "Take or choose a photo of the church"}
+              <input type="file" accept="image/*" capture="environment" className="sr-only" disabled={uploading} onChange={(e) => void choosePhoto(e.target.files?.[0])} />
+            </label>
+          )}
+          <p className="text-[13px] text-muted">The outside of the building helps visitors recognise it. Photos are resized on your phone before upload.</p>
+        </section>
+      )}
 
       <section aria-labelledby="det-h" className="grid gap-4 sm:grid-cols-2">
         <h3 id="det-h" className="font-semibold text-navy-900 sm:col-span-2">
@@ -235,7 +322,7 @@ export function ChurchForm({ lookup, manageable, defaultAssociationId, church, o
           <button type="button" onClick={onDone} className="btn btn-outline" disabled={busy}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button type="submit" className="btn btn-primary" disabled={busy || uploading}>
             {busy ? "Saving…" : !isManager ? "Send suggestion" : editing ? "Save changes" : "Publish church"}
           </button>
         </div>
