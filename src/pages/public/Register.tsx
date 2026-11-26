@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
-import { Check, MailCheck } from "lucide-react";
+import { Check} from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { makeLookup } from "../../lib/directory";
