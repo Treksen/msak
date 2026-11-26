@@ -442,7 +442,8 @@ export function RegisterPage() {
               error={errors.expected_completion_year}
               hint={
                 f.completed
-                  ? ""
+                  ? "You'll join as alumni."
+                  : "Used to welcome you into the alumni community later."
               }
             />
           </div>
