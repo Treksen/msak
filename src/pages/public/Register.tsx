@@ -138,7 +138,7 @@ export function RegisterPage() {
       if (!f.completed && !(yos >= 1 && yos <= 10)) e.year_of_study = "Between 1 and 10.";
       if (!(done >= adm && done <= adm + 12)) e.expected_completion_year = "Must be after your admission year.";
       else if (f.completed && done > thisYear) e.expected_completion_year = `If you've completed your studies, this is ${thisYear} or earlier.`;
-      else if (!f.completed && done < thisYear) e.expected_completion_year = "That's in the past — choose “I've completed my studies” above if you've graduated.";
+      else if (!f.completed && done < thisYear) e.expected_completion_year = "That's in the past — choose “Alumni” above if you've graduated.";
     }
     if (i === 2 && f.leader_level && f.leader_position.trim().length < 2) e.leader_position = "Enter your position, e.g. Chairperson.";
     if (i === 3 && !f.accept) e.accept = "Please accept the terms to continue.";
@@ -195,11 +195,11 @@ export function RegisterPage() {
   if (sentTo) {
     return (
       <div className="container-page flex max-w-xl flex-col items-start gap-4 py-20">
-        <MailCheck className="size-12 text-gold-700" aria-hidden="true" />
-        <h1 className="font-serif text-4xl font-semibold text-navy-900">Check your email</h1>
+        {/* <MailCheck className="size-12 text-gold-700" aria-hidden="true" /> */}
+        {/* <h1 className="font-serif text-4xl font-semibold text-navy-900">Check your email</h1>
         <p className="text-[17px] leading-relaxed text-body">
           We sent a confirmation link to <strong>{sentTo}</strong>. Open it on this device to activate your account, then log in.
-        </p>
+        </p> */}
         <Link to="/login" className="btn btn-primary">
           Go to login
         </Link>
@@ -253,7 +253,7 @@ export function RegisterPage() {
                 autoComplete="email"
                 autoCapitalize="none"
                 spellCheck={false}
-                hint="Use an address you check — it's how you reset your password."
+                hint="Use a valid email address."
               />
               {(() => {
                 const mail = checkEmail(f.email);
@@ -304,7 +304,7 @@ export function RegisterPage() {
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                hint="Type it again (not pasted) to catch mistakes."
+                hint="Type it again."
               />
             </div>
             <TextInput label="Password" type="password" value={f.password} onChange={(e) => set("password", e.target.value)} error={errors.password} autoComplete="new-password" hint="At least 8 characters." />
@@ -379,12 +379,12 @@ export function RegisterPage() {
               ))}
             </SelectInput>
             <fieldset className="sm:col-span-2">
-              <legend className="field-label">Are you still studying?</legend>
+              <legend className="field-label">Status</legend>
               <div className="mt-1 grid gap-2 sm:grid-cols-2">
                 {(
                   [
-                    [false, "I'm still studying"],
-                    [true, "I've completed my studies (alumni)"],
+                    [false, "Current Student"],
+                    [true, "Alumni"],
                   ] as const
                 ).map(([value, label]) => (
                   <label
@@ -442,8 +442,7 @@ export function RegisterPage() {
               error={errors.expected_completion_year}
               hint={
                 f.completed
-                  ? "You'll join as alumni. After signing up you can add any leadership positions you held."
-                  : "Used to welcome you into the alumni community later."
+                  ? ""
               }
             />
           </div>
@@ -452,13 +451,12 @@ export function RegisterPage() {
         {step === 2 && (
           <div className="flex flex-col gap-4">
             <p className="text-[15px] leading-relaxed text-body">
-              Do you hold a leadership position? Your request is checked before you can post: campus leaders are verified by your regional
-              leaders; regional and national leaders by an MSAK administrator.
+              Do you hold a leadership position?.
             </p>
             <div className="grid gap-2" role="radiogroup" aria-label="Leadership">
               {(
                 [
-                  ["", "No, I'm a member", "Most people choose this."],
+                  ["", "No, I'm a member"],
                   ["institutional", "Institutional leader", `Post to members at ${inst?.name ?? "your institution"}.`],
                   ["regional", "Regional leader", `Post to all of ${assoc?.code ?? "your association"}; verify campus leaders.`],
                   ["national", "National leader", "Post to all MSAK members."],

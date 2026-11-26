@@ -45,8 +45,7 @@ export function PastLeadersPage() {
       <p className="text-[13px] font-bold uppercase tracking-[0.14em] text-gold-700">Our story</p>
       <h1 className="mt-2 font-serif text-4xl font-semibold text-navy-900 sm:text-5xl">Past leaders</h1>
       <p className="mt-4 max-w-2xl text-[17px] leading-relaxed text-body">
-        Students who carried the lamp before us — nationally and in our regional associations. Each position here has been confirmed by MSAK
-        leadership, and is listed with the person's permission.
+        Students who carried the lamp before us — nationally and in our regional associations.
       </p>
 
       {on === false && (
