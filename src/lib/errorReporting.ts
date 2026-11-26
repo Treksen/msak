@@ -5,6 +5,7 @@ import { api } from "./api";
  * - Same error is sent once per visit; at most 10 reports per visit.
  * - Skips browser noise (extensions, ResizeObserver, cancelled requests) and errors while offline.
  * - Only the page path is sent — never the query string or #hash (password-reset links carry tokens there).
+ * - Nothing is sent while developing on localhost.
  */
 const sent = new Set<string>();
 let count = 0;
@@ -31,6 +32,11 @@ function describe(err: unknown): { message: string; stack: string | null } {
 export function reportError(err: unknown, where?: string) {
   try {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    // errors while developing on your own computer stay in the browser console, not the live error log
+    if (import.meta.env.DEV || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+      console.error(where ? `[${where}]` : "[error]", err);
+      return;
+    }
     const { message, stack } = describe(err);
     const text = where ? `${message} (${where})` : message;
     if (!message || NOISE.some((re) => re.test(message) || (stack ? re.test(stack) : false))) return;

@@ -1,24 +1,12 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useNavigation } from "react-router";
 import { NavProgress } from "./PageLoading";
-import {
-  BadgeCheck,
-  FileText,
-  Home,
-  LogOut,
-  MapPin,
-  Megaphone,
-  MessageSquare,
-  Settings,
-  User,
-  Users,
-  Menu,
-  X,
-} from "lucide-react";
+import { Activity, AlertTriangle, Award, BadgeCheck, Building2, FileText, History, Home, LogOut, MapPin, Megaphone, Menu, MessageSquare, Settings, SlidersHorizontal, User, Users, X } from "lucide-react";
 import { useAuth, permissions } from "../lib/auth";
 import { api } from "../lib/api";
 import { makeLookup } from "../lib/directory";
-import { initials } from "../lib/format";
+import { usePortalTheme } from "../lib/theme";
+import { Avatar } from "./Avatar";
 import { DemoBanner } from "./DemoBanner";
 import { Spinner } from "./ui";
 import { isRoleActive, roleState } from "../lib/academic";
@@ -34,7 +22,9 @@ export function PortalLayout() {
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
   useNoIndex();
+  usePortalTheme();
   const [pending, setPending] = useState(0);
+  const [newMembers, setNewMembers] = useState(0);
 
   const lookup = makeLookup(directory);
   const myAssoc = lookup.associationOfInstitution(me?.profile?.institution_id);
@@ -43,10 +33,26 @@ export function PortalLayout() {
   useEffect(() => setMoreOpen(false), [location.pathname]);
   useEffect(() => {
     if (!me || !perms.canReviewLeaders) return;
-    api
-      .listLeaderRoles()
-      .then((rows) => setPending(rows.filter((r) => ["pending", "renewal"].includes(roleState(r))).length))
+    // leader requests + past leadership waiting for this reviewer
+    Promise.all([api.listLeaderRoles(), api.listPastRoles().catch(() => [])])
+      .then(([rows, past]) =>
+        setPending(
+          rows.filter((r) => ["pending", "renewal"].includes(roleState(r))).length +
+            past.filter((r) => r.status === "pending" && r.user_id !== me.userId).length,
+        ),
+      )
       .catch(() => setPending(0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, location.pathname]);
+
+  // New members waiting for confirmation (campus leaders, regional leaders, admins)
+  const canConfirmMembers = !!me && (me.isAdmin || me.roles.some((r) => isRoleActive(r) && r.level !== "national"));
+  useEffect(() => {
+    if (!canConfirmMembers) return;
+    api
+      .countPendingMembers()
+      .then(setNewMembers)
+      .catch(() => setNewMembers(0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, location.pathname]);
 
@@ -58,15 +64,29 @@ export function PortalLayout() {
     { to: "/app/announcements", label: "Announcements", icon: Megaphone },
     { to: "/app/churches", label: "Churches", icon: MapPin },
     { to: "/app/documents", label: "Documents", icon: FileText },
+    ...(me.profile
+      ? [
+          { to: "/app/leadership", label: "My leadership", icon: Award },
+          { to: "/app/past-leadership", label: "Past leadership", icon: History },
+        ]
+      : []),
     { to: "/app/profile", label: me.profile ? "My profile" : "My account", icon: User },
+    { to: "/app/settings", label: "Settings", icon: SlidersHorizontal },
     { to: "/app/feedback", label: "Help & feedback", icon: MessageSquare },
   ];
   const leader: Item[] = [
     ...(perms.canReviewLeaders ? [{ to: "/app/leaders", label: "Leader approvals", icon: BadgeCheck, badge: pending }] : []),
-    ...(perms.canSeeMembers ? [{ to: "/app/members", label: perms.isAdmin ? "Members" : "Members in my scope", icon: Users }] : []),
-    ...(perms.isAdmin ? [{ to: "/app/admin", label: "Administration", icon: Settings }] : []),
+    ...(perms.canSeeMembers ? [{ to: "/app/members", label: perms.isAdmin ? "Members" : "Members in my scope", icon: Users, badge: canConfirmMembers ? newMembers : 0 }] : []),
+    ...(perms.isAdmin
+      ? [
+          { to: "/app/admin", label: "Administration", icon: Settings, end: true },
+          { to: "/app/admin/directory", label: "Directory", icon: Building2 },
+          { to: "/app/admin/activity", label: "Activity log", icon: Activity },
+          { to: "/app/admin/errors", label: "Error log", icon: AlertTriangle },
+        ]
+      : []),
   ];
-  const tabs: Item[] = [member[0], member[1], member[2], member[4]];
+  const tabs: Item[] = ["/app", "/app/announcements", "/app/churches", "/app/profile"].map((to) => member.find((m) => m.to === to)!);
   const roleLine = me.isAdmin
     ? me.profile
       ? "Administrator"
@@ -122,9 +142,9 @@ export function PortalLayout() {
         </nav>
       )}
       <div className="mt-auto flex items-center gap-3 border-t border-navy-700 px-2 pt-4">
-        <span aria-hidden="true" className="flex size-10 flex-none items-center justify-center rounded-full bg-gold-500 font-bold text-navy-900">
-          {initials(me.profile?.full_name ?? "M")}
-        </span>
+        <Link to={me.profile ? "/app/profile" : "/app/settings"} aria-label="My profile" className="flex-none rounded-full">
+          <Avatar name={me.profile?.full_name ?? "M"} path={me.profile?.photo_path} size={40} />
+        </Link>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-white">{me.profile?.full_name ?? (me.isAdmin ? "Administrator" : me.email)}</span>
           <span className="block truncate text-xs text-navy-300">{roleLine}</span>
@@ -189,7 +209,9 @@ export function PortalLayout() {
         >
           <Menu className="size-[22px]" aria-hidden="true" />
           More
-          {pending > 0 && <span className="absolute right-[22%] top-1 size-2.5 rounded-full bg-gold-500" aria-label={`${pending} pending`} />}
+          {pending + newMembers > 0 && (
+            <span className="absolute right-[22%] top-1 size-2.5 rounded-full bg-gold-500" aria-label={`${pending + newMembers} waiting for you`} />
+          )}
           <span className="h-0.5 w-[18px]" />
         </button>
       </nav>

@@ -1,11 +1,15 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router";
+import { Camera, Trash2 } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth, useMe } from "../../lib/auth";
 import { usePortal } from "../../lib/portal";
-import { formatDate, levelLabel } from "../../lib/format";
-import { canRenew, formatDay, isAlumni, roleState } from "../../lib/academic";
-import type { Gender, LeaderLevel } from "../../lib/types";
-import { Alert, PageHeader, SelectInput, StatusBadge, TextInput } from "../../components/ui";
+import { formatDate } from "../../lib/format";
+import { isAlumni } from "../../lib/academic";
+import { squarePhoto } from "../../lib/image";
+import type { Gender } from "../../lib/types";
+import { Alert, PageHeader, SelectInput, TextInput } from "../../components/ui";
+import { Avatar } from "../../components/Avatar";
 
 export function ProfilePage() {
   const me = useMe();
@@ -65,10 +69,12 @@ export function ProfilePage() {
         </Alert>
       )}
 
+      <PhotoCard name={p.full_name} path={p.photo_path} />
+
       <form onSubmit={save} className="card grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
         <h2 className="font-serif text-xl font-semibold text-navy-900 sm:col-span-2">Personal details</h2>
         <TextInput label="Full name" name="full_name" defaultValue={p.full_name} required minLength={2} maxLength={120} />
-        <TextInput label="Email" value={me.email ?? ""} disabled hint="Contact an administrator to change your login email." />
+        <TextInput label="Email" value={me.email ?? ""} disabled hint="Email wrong? Tell MSAK in Help & feedback (or ask your campus leader) and an administrator will correct it; your password stays the same." />
         <TextInput label="Phone" name="phone" type="tel" defaultValue={p.phone} required />
         <SelectInput label="Gender" name="gender" defaultValue={p.gender}>
           <option>Male</option>
@@ -76,6 +82,16 @@ export function ProfilePage() {
         </SelectInput>
 
         <h2 className="mt-4 font-serif text-xl font-semibold text-navy-900 sm:col-span-2">Campus</h2>
+        <p className="-mt-2 text-sm sm:col-span-2">
+          {p.verification === "verified" ? (
+            <span className="font-semibold text-success">✓ Confirmed as a student here{p.verified_at ? ` · ${formatDate(p.verified_at)}` : ""}</span>
+          ) : p.verification === "pending" ? (
+            <span className="font-semibold text-gold-800">Waiting for a leader to confirm you study here.</span>
+          ) : (
+            <span className="font-semibold text-danger">Not confirmed{p.verification_note ? ` — ${p.verification_note}` : ""}. Correct your institution below if it's wrong.</span>
+          )}{" "}
+          <span className="text-muted">Changing institution means the new campus's leaders confirm you again.</span>
+        </p>
         <SelectInput
           label="Association"
           value={assocId ?? ""}
@@ -141,137 +157,74 @@ export function ProfilePage() {
         </div>
       </form>
 
-      <LeadershipSection />
+      <p className="text-sm text-muted">
+        Leader roles and past positions are under <Link to="/app/leadership">My leadership</Link> and{" "}
+        <Link to="/app/past-leadership">Past leadership</Link>. Password and dark mode are in <Link to="/app/settings">Settings</Link>.
+      </p>
     </div>
   );
 }
 
-function LeadershipSection() {
-  const me = useMe();
+/** Profile photo: pick one from the phone/computer; it's cropped square and shrunk before upload. */
+function PhotoCard({ name, path }: { name: string; path?: string | null }) {
   const { refresh } = useAuth();
-  const { lookup } = usePortal();
-  const [level, setLevel] = useState<LeaderLevel>("institutional");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const open = me.roles.filter((r) => r.status === "pending" || r.status === "approved");
-  const available = (["institutional", "regional", "national"] as const).filter((l) => !open.some((r) => r.level === l));
-  const chosen = available.includes(level) ? level : available[0];
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<"up" | "rm" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function request(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const f = new FormData(form);
-    setBusy(true);
-    setMsg(null);
+  async function choose(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setBusy("up");
     try {
-      await api.requestLeaderRole(chosen, String(f.get("position") ?? ""));
+      await api.uploadProfilePhoto(await squarePhoto(file));
       await refresh();
-      setMsg({ tone: "success", text: "Request sent. You'll be able to post once it's verified." });
-      form.reset();
-    } catch (err) {
-      setMsg({ tone: "error", text: errorMessage(err) });
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
+      if (input.current) input.current.value = "";
+    }
+  }
+  async function remove() {
+    if (!confirm("Remove your profile photo?")) return;
+    setError(null);
+    setBusy("rm");
+    try {
+      await api.removeProfilePhoto();
+      await refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
     }
   }
 
   return (
-    <section aria-labelledby="lead-h" className="card flex flex-col gap-4 p-5 sm:p-6">
-      <h2 id="lead-h" className="font-serif text-xl font-semibold text-navy-900">
-        Leadership
-      </h2>
-      {me.roles.length === 0 ? (
-        <p className="text-sm text-body">You don't hold a leadership role in the portal.</p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {me.roles.map((r) => (
-            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line p-3">
-              <span>
-                <span className="block font-semibold text-navy-900">
-                  {levelLabel[r.level]} leader · {r.position}
-                </span>
-                <span className="block text-[13px] text-muted">
-                  {r.level === "institutional"
-                    ? lookup.institution(r.institution_id)?.name
-                    : r.level === "regional"
-                      ? lookup.association(r.association_id)?.name
-                      : "All of MSAK"}{" "}
-                  {r.status === "approved" && r.term_ends_on
-                    ? ` · ${roleState(r) === "expired" ? "term ended" : "term ends"} ${formatDay(r.term_ends_on)}`
-                    : ` · requested ${formatDate(r.requested_at)}`}
-                  {r.review_note ? ` · “${r.review_note}”` : ""}
-                </span>
-                {roleState(r) === "expired" && (
-                  <span className="mt-1 block text-[13px] font-semibold text-gold-800">
-                    Expired at the end of the academic year — renew to post again.
-                  </span>
-                )}
-                {roleState(r) === "renewal" && (
-                  <span className="mt-1 block text-[13px] text-muted">Renewal for next year is waiting for approval.</span>
-                )}
-              </span>
-              <span className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={roleState(r)} />
-                {canRenew(r) && (
-                  <button
-                    type="button"
-                    className="btn btn-gold btn-sm"
-                    onClick={async () => {
-                      try {
-                        await api.renewLeaderRole(r.id);
-                        await refresh();
-                      } catch (e) {
-                        alert(errorMessage(e));
-                      }
-                    }}
-                  >
-                    Renew for next year
-                  </button>
-                )}
-                {r.status === "approved" && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={async () => {
-                      if (!confirm("Step down from this role? You'll lose its posting rights.")) return;
-                      try {
-                        await api.revokeLeaderRole(r.id, "Stepped down");
-                        await refresh();
-                      } catch (e) {
-                        alert(errorMessage(e));
-                      }
-                    }}
-                  >
-                    Step down
-                  </button>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {available.length > 0 && chosen && (
-        <form onSubmit={request} className="grid gap-4 border-t border-line pt-4 sm:grid-cols-[200px_1fr_auto] sm:items-end">
-          <SelectInput label="Request a role" value={chosen} onChange={(e) => setLevel(e.target.value as LeaderLevel)}>
-            {available.map((l) => (
-              <option key={l} value={l}>
-                {levelLabel[l]} leader
-              </option>
-            ))}
-          </SelectInput>
-          <TextInput label="Position" name="position" required minLength={2} maxLength={100} placeholder="e.g. Chairperson" />
-          <button type="submit" className="btn btn-outline" disabled={busy}>
-            {busy ? "Sending…" : "Send request"}
+    <section aria-labelledby="photo-h" className="card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+      <Avatar name={name} path={path} size={96} className="text-2xl" />
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div>
+          <h2 id="photo-h" className="font-serif text-xl font-semibold text-navy-900">
+            Profile photo
+          </h2>
+          <p className="mt-1 text-sm text-muted">A clear photo of your face helps leaders recognise and confirm you. It's cropped to a square.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => void choose(e.target.files?.[0])} />
+          <button type="button" className="btn btn-outline btn-sm" disabled={!!busy} onClick={() => input.current?.click()}>
+            <Camera className="size-4" aria-hidden="true" />
+            {busy === "up" ? "Uploading…" : path ? "Change photo" : "Upload photo"}
           </button>
-          <p className="text-[13px] text-muted sm:col-span-3">
-            {chosen === "institutional"
-              ? "Verified by your regional leaders."
-              : "Verified by an MSAK administrator."}
-          </p>
-        </form>
-      )}
-      {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
+          {path && (
+            <button type="button" className="btn btn-ghost btn-sm text-danger" disabled={!!busy} onClick={() => void remove()}>
+              <Trash2 className="size-4" aria-hidden="true" />
+              {busy === "rm" ? "Removing…" : "Remove"}
+            </button>
+          )}
+        </div>
+        {error && <Alert tone="error">{error}</Alert>}
+      </div>
     </section>
   );
 }
@@ -279,29 +232,6 @@ function LeadershipSection() {
 /** Account page for an administrator who has no member profile (not a student). */
 function AdminAccount() {
   const me = useMe();
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-
-  async function changePassword(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const f = new FormData(form);
-    const pw = String(f.get("password") ?? "");
-    if (pw.length < 8) return setMsg({ tone: "error", text: "Use at least 8 characters." });
-    if (pw !== String(f.get("confirm") ?? "")) return setMsg({ tone: "error", text: "The two passwords don't match." });
-    setBusy(true);
-    setMsg(null);
-    try {
-      await api.updatePassword(pw);
-      form.reset();
-      setMsg({ tone: "success", text: "Password changed." });
-    } catch (err) {
-      setMsg({ tone: "error", text: errorMessage(err) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-8">
       <PageHeader eyebrow="Administrator" title="My account">
@@ -310,6 +240,9 @@ function AdminAccount() {
       <section className="card flex flex-col gap-3 p-5 sm:p-6">
         <h2 className="font-serif text-xl font-semibold text-navy-900">Sign-in</h2>
         <TextInput label="Email" value={me.email ?? ""} disabled hint="Change it in Supabase → Authentication → Users." />
+        <p className="text-sm text-muted">
+          Change your password or switch to dark mode in <Link to="/app/settings">Settings</Link>.
+        </p>
       </section>
       <section className="card flex flex-col gap-2 p-5 sm:p-6">
         <h2 className="font-serif text-xl font-semibold text-navy-900">You're invisible to members</h2>
@@ -320,21 +253,6 @@ function AdminAccount() {
           <li>You can see and manage everything: members, leaders, announcements, churches and documents.</li>
         </ul>
       </section>
-      <form onSubmit={changePassword} className="card grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
-        <h2 className="font-serif text-xl font-semibold text-navy-900 sm:col-span-2">Change password</h2>
-        <TextInput label="New password" name="password" type="password" autoComplete="new-password" minLength={8} required hint="At least 8 characters." />
-        <TextInput label="Confirm new password" name="confirm" type="password" autoComplete="new-password" required />
-        {msg && (
-          <div className="sm:col-span-2">
-            <Alert tone={msg.tone}>{msg.text}</Alert>
-          </div>
-        )}
-        <div className="flex justify-end sm:col-span-2">
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? "Saving…" : "Change password"}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }

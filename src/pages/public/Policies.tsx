@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { policies, policyList } from "../../lib/policies";
+import { policies, policyList, type PolicyDocument } from "../../lib/policies";
 import { formatDate } from "../../lib/format";
 import { NotFoundPage } from "./NotFound";
 import { useSeo } from "../../lib/seo";
@@ -43,21 +43,28 @@ export function PolicyPage() {
         Version {doc.version} · Updated {formatDate(doc.lastUpdated)}
       </p>
       <p className="mt-4 text-[17px] leading-relaxed text-body">{doc.description}</p>
-      <div className="prose-msak mt-8 space-y-8">
-        {doc.sections.map((s) => (
-          <section key={s.heading}>
-            <h2 className="mb-3 font-serif text-2xl font-semibold text-navy-900">{s.heading}</h2>
-            {s.paragraphs?.map((p) => <p key={p}>{p}</p>)}
-            {s.bullets && (
-              <ul>
-                {s.bullets.map((b) => (
-                  <li key={b}>{b}</li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))}
-      </div>
+      <PolicySections doc={doc} />
     </article>
+  );
+}
+
+/** The body of a policy; also shown in a pop-up during registration. */
+export function PolicySections({ doc, compact }: { doc: PolicyDocument; compact?: boolean }) {
+  return (
+    <div className={`prose-msak ${compact ? "mt-2 space-y-6" : "mt-8 space-y-8"}`}>
+      {doc.sections.map((s) => (
+        <section key={s.heading}>
+          <h2 className={`mb-3 font-serif font-semibold text-navy-900 ${compact ? "text-xl" : "text-2xl"}`}>{s.heading}</h2>
+          {s.paragraphs?.map((p) => <p key={p}>{p}</p>)}
+          {s.bullets && (
+            <ul>
+              {s.bullets.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+    </div>
   );
 }

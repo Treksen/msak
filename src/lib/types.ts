@@ -24,7 +24,15 @@ export type Profile = {
   expected_completion_year: number;
   terms_accepted_at: string;
   created_at: string;
+  /** Confirmed by a campus/regional leader as a real student. New sign-ups start as "pending". */
+  verification: Verification;
+  verified_at: string | null;
+  verification_note: string | null;
+  /** Profile photo: a storage path (live) or an image data link (demo). */
+  photo_path?: string | null;
 };
+
+export type Verification = "pending" | "verified" | "declined";
 
 export type ProfilePatch = Partial<
   Pick<
@@ -163,7 +171,14 @@ export type FeedbackItem = {
   created_at: string;
 };
 
-export type MemberRow = Profile & { roles: LeaderRole[]; isAdmin: boolean };
+export type MemberRow = Profile & {
+  roles: LeaderRole[];
+  isAdmin: boolean;
+  /** Login email — filled in for administrators only. */
+  email?: string | null;
+  /** Confirmed past leadership (shown to leaders and admins). */
+  pastRoles?: PastRole[];
+};
 
 export type Stats = { associations: number; counties: number; institutions: number; churches: number };
 
@@ -182,7 +197,7 @@ export type SignUpInput = {
   leader_position: string | null;
 };
 
-export type DemoPersona = "member" | "institutional" | "regional" | "national" | "admin";
+export type DemoPersona = "member" | "newcomer" | "institutional" | "regional" | "national" | "admin";
 
 /** Event strip with a countdown on the homepage (managed by administrators). */
 export type HomeBanner = {
@@ -258,3 +273,66 @@ export type ErrorEntry = {
 };
 
 export type ClientErrorReport = { message: string; stack?: string | null; url: string; userAgent: string };
+
+/** A leadership position someone held before; a leader confirms it. History only — no posting rights. */
+export type PastRole = {
+  id: string;
+  user_id: string;
+  level: LeaderLevel;
+  association_id: number | null;
+  institution_id: number | null;
+  position: string;
+  from_year: number;
+  to_year: number;
+  status: "pending" | "confirmed" | "declined";
+  show_publicly: boolean;
+  /** An administrator hid it from the public page (the member can't undo this). */
+  hidden_by_admin: boolean;
+  review_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+export type PastRoleInput = {
+  level: LeaderLevel;
+  association_id: number | null;
+  institution_id: number | null;
+  position: string;
+  from_year: number;
+  to_year: number;
+  show_publicly: boolean;
+};
+
+/** One line on the public Past leaders page. */
+export type PublicPastLeader = {
+  full_name: string;
+  level: "regional" | "national";
+  association_code: string | null;
+  association_name: string | null;
+  title: string;
+  from_year: number;
+  to_year: number;
+};
+
+/** Everything an administrator can change on a member's profile. */
+export type AdminProfilePatch = {
+  full_name: string;
+  gender: Gender;
+  phone: string;
+  institution_id: number;
+  course: string;
+  admission_year: number;
+  year_of_study: number;
+  expected_completion_year: number;
+  verification: Verification;
+};
+
+/** A current leader role as an administrator sets it. */
+export type AdminRoleInput = {
+  level: LeaderLevel;
+  position: string;
+  association_id: number | null;
+  institution_id: number | null;
+  status: LeaderRole["status"];
+  term_ends_on: string | null;
+};

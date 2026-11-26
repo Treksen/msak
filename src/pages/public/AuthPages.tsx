@@ -30,6 +30,7 @@ function AuthShell({ title, intro, children }: { title: string; intro?: ReactNod
 
 const personas: { id: DemoPersona; label: string; note: string }[] = [
   { id: "member", label: "Member", note: "JKUAT student" },
+  { id: "newcomer", label: "New member", note: "Waiting for a leader to confirm" },
   { id: "institutional", label: "Institutional leader", note: "Posts to JKUAT" },
   { id: "regional", label: "Regional leader", note: "NAMSA · approves campus leaders" },
   { id: "national", label: "National leader", note: "Posts to all members" },

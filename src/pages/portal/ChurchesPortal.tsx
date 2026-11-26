@@ -12,6 +12,8 @@ import { Alert, Modal, PageHeader, Spinner } from "../../components/ui";
 /** Churches inside the portal: leaders add, pin and confirm; members suggest. */
 export function ChurchesPortalPage() {
   const me = useMe();
+  // a leader found this person isn't a student: they can browse the map but not suggest or report churches
+  const declined = me.profile?.verification === "declined";
   const { lookup, perms } = usePortal();
   const [params, setParams] = useSearchParams();
   const [churches, setChurches] = useState<Church[] | null>(null);
@@ -111,6 +113,24 @@ export function ChurchesPortalPage() {
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => void resolve(r.id)}>
                       Mark resolved
                     </button>
+                    {perms.isAdmin && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm text-danger"
+                        aria-label="Delete this report"
+                        onClick={async () => {
+                          if (!confirm("Delete this report?")) return;
+                          try {
+                            await api.deleteChurchReport(r.id);
+                            load();
+                          } catch (e) {
+                            setError(errorMessage(e));
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </li>
               );
@@ -127,11 +147,11 @@ export function ChurchesPortalPage() {
         <ChurchFinder
           churches={churches}
           lookup={lookup}
-          onAdd={() => setParams({ add: "1" })}
+          onAdd={declined ? undefined : () => setParams({ add: "1" })}
           addLabel={manageable.length > 0 ? "Add a church" : "Suggest a church"}
           canEdit={(c) => perms.canManageChurchesIn(c.association_id)}
           onEdit={setEditing}
-          onReport={setReporting}
+          onReport={declined ? undefined : setReporting}
         />
       )}
 

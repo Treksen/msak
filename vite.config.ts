@@ -22,6 +22,7 @@ function seoFiles(): Plugin {
     { path: "/", priority: "1.0", freq: "weekly" },
     { path: "/churches", priority: "0.9", freq: "weekly" },
     { path: "/register", priority: "0.8", freq: "monthly" },
+    { path: "/past-leaders", priority: "0.5", freq: "monthly" },
     { path: "/policies", priority: "0.4", freq: "yearly" },
     ...policySlugs.map((slug) => ({ path: `/policies/${slug}`, priority: "0.3", freq: "yearly" })),
   ];

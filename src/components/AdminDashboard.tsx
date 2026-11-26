@@ -18,8 +18,11 @@ export function AdminDashboardPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // remove accounts declined more than 30 days ago (backup for the daily scheduled clean-up), then load figures
     api
-      .adminDashboard()
+      .purgeDeclinedAccounts()
+      .catch(() => 0)
+      .then(() => api.adminDashboard())
       .then(setData)
       .catch((e) => setError(errorMessage(e)));
   }, []);
@@ -61,13 +64,13 @@ export function AdminDashboardPanel() {
           to="/app/churches"
           attention={data.churches_suggested + data.open_reports > 0}
         />
-        <Tile icon={<Activity />} label="Activity this week" value={data.activity_7d} note="Changes made in the portal" to="/app/admin/logs" />
+        <Tile icon={<Activity />} label="Activity this week" value={data.activity_7d} note="Changes made in the portal" to="/app/admin/activity" />
         <Tile
           icon={<AlertTriangle />}
           label="App errors this week"
           value={data.errors_7d}
           note={data.errors_7d ? "Open the error log" : "None reported"}
-          to="/app/admin/logs?tab=errors"
+          to="/app/admin/errors"
           attention={data.errors_7d > 0}
         />
       </ul>

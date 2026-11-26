@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigation } from "react-router";
 import { NavProgress } from "./PageLoading";
+import { usePastLeadersPublic } from "../lib/pastLeadersSetting";
 import { Menu, X } from "lucide-react";
 import { Logo } from "./Brand";
 import { useAuth } from "../lib/auth";
@@ -66,6 +67,7 @@ function useSectionInView(enabled: boolean, initial: string) {
  */
 export function PublicLayout() {
   const navigation = useNavigation();
+  const pastLeadersOn = usePastLeadersPublic();
   const { me } = useAuth();
   const { pathname, hash } = useLocation();
   const [open, setOpen] = useState(false);
@@ -260,6 +262,7 @@ export function PublicLayout() {
             <ul className="space-y-2">
               <li><Link to="/churches" className="text-navy-100">Find a church</Link></li>
               <li><Link to="/#story" className="text-navy-100">Our story</Link></li>
+              {pastLeadersOn && <li><Link to="/past-leaders" className="text-navy-100">Past leaders</Link></li>}
               <li><Link to="/register" className="text-navy-100">Become a member</Link></li>
               <li><Link to="/login" className="text-navy-100">Member login</Link></li>
             </ul>

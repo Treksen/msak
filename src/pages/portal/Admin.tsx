@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router";
-import { BadgeCheck, FileText, MapPin, Megaphone, Pencil, Plus, ScrollText, Star, Trash2, Users } from "lucide-react";
+import { BadgeCheck, Building2, FileText, MapPin, Megaphone, Pencil, Plus, ScrollText, Star, Trash2, Users } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { usePortal } from "../../lib/portal";
@@ -28,7 +28,8 @@ export function AdminPage() {
     { to: "/app/members", icon: Users, title: "Members", text: "Search, export to CSV, add administrators." },
     { to: "/app/churches", icon: MapPin, title: "Churches", text: "Edit any church, confirm suggestions anywhere." },
     { to: "/app/documents", icon: FileText, title: "Documents", text: "Upload the constitution, guidelines and forms." },
-    { to: "/app/admin/logs", icon: ScrollText, title: "Activity & error logs", text: "Who changed what, and errors on people's devices." },
+    { to: "/app/admin/activity", icon: ScrollText, title: "Activity & error logs", text: "Who changed what, and errors on people's devices." },
+    { to: "/app/admin/directory", icon: Building2, title: "Directory", text: "Edit, move or delete associations, counties and institutions." },
   ];
 
   return (
@@ -40,7 +41,7 @@ export function AdminPage() {
       <AdminDashboardPanel />
 
       <h2 className="-mb-4 font-serif text-xl font-semibold text-navy-900">Tools</h2>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {shortcuts.map((s) => (
           <li key={s.to}>
             <Link to={s.to} className="card flex h-full flex-col gap-2 p-5 no-underline hover:border-line-strong">
@@ -84,7 +85,25 @@ export function AdminPage() {
                   </span>
                   {timeAgo(f.created_at)}
                 </p>
-                <p className="mt-1 whitespace-pre-line text-sm text-body">{f.message}</p>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <p className="whitespace-pre-line text-sm text-body">{f.message}</p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm flex-none text-danger"
+                    aria-label="Delete this feedback"
+                    onClick={async () => {
+                      if (!confirm("Delete this feedback message?")) return;
+                      try {
+                        await api.deleteFeedback(f.id);
+                        setFeedback((list) => list?.filter((x) => x.id !== f.id) ?? null);
+                      } catch (e) {
+                        alert(errorMessage(e));
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

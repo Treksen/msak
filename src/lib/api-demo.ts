@@ -5,6 +5,8 @@ import type {
   Announcement,
   Church,
   ChurchReport,
+  PastRole,
+  PublicPastLeader,
   AdminDashboard,
   AuditEntry,
   ErrorEntry,
@@ -26,7 +28,7 @@ import churchSeed from "../data/churches.seed.json";
  * so you can preview every role before connecting Supabase.
  */
 
-const KEY = "msak-demo-v6";
+const KEY = "msak-demo-v9";
 const directory = directoryJson as Directory;
 
 type DemoUser = { id: string; email: string; password: string };
@@ -43,6 +45,8 @@ type State = {
   banners: HomeBanner[];
   reports?: ChurchReport[];
   audit?: AuditEntry[];
+  pastRoles?: PastRole[];
+  settings?: { past_leaders_public?: boolean };
   errors?: ErrorEntry[];
   session: string | null;
 };
@@ -86,6 +90,9 @@ function seed(): State {
     expected_completion_year: 2027,
     terms_accepted_at: ago(2000),
     created_at: ago(2000),
+    verification: "verified",
+    verified_at: ago(1900),
+    verification_note: null,
   });
   const role = (
     user_id: string,
@@ -117,6 +124,7 @@ function seed(): State {
     { id: "demo-applicant-1", email: "a1@demo.msak", password: "demo1234" },
     { id: "demo-applicant-2", email: "a2@demo.msak", password: "demo1234" },
     { id: "demo-alumnus", email: "alumni@demo.msak", password: "demo1234" },
+    { id: "demo-newcomer", email: "new@demo.msak", password: "demo1234" },
   ];
   const profiles = [
     person("demo-member", "Moses Mwangi", "Male", jkuat, 1),
@@ -126,6 +134,8 @@ function seed(): State {
     person("demo-applicant-1", "Kevin Kiprono", "Male", ku, 2),
     person("demo-applicant-2", "Grace Muthoni", "Female", nyeriInst, 3),
     { ...person("demo-alumnus", "Peter Kamau", "Male", ku, 4), admission_year: 2018, expected_completion_year: 2022 },
+    // a first-year who just joined: waiting for a JKUAT or NAMSA leader to confirm them
+    { ...person("demo-newcomer", "Brian Odhiambo", "Male", jkuat, 1), admission_year: 2026, expected_completion_year: 2030, verification: "pending" as const, verified_at: null },
   ].map((p, i) => ({ ...p, created_at: ago(24 * (330 - i * 52)) })); // joined over the past year, for the dashboard chart
   const roles = [
     role("demo-institutional", "institutional", "Secretary", jkuat, "approved"),
@@ -197,6 +207,10 @@ function seed(): State {
     churches,
     documents: [],
     feedback: [],
+    pastRoles: [
+      { id: "past-1", user_id: "demo-alumnus", level: "regional", association_id: directory.associations.find((x) => x.code === "MKEMSA")?.id ?? 1, institution_id: null, position: "Chairperson", from_year: 2020, to_year: 2021, status: "confirmed", show_publicly: true, hidden_by_admin: false, review_note: null, reviewed_at: ago(900), created_at: ago(1000) },
+      { id: "past-2", user_id: "demo-alumnus", level: "national", association_id: null, institution_id: null, position: "Treasurer", from_year: 2021, to_year: 2022, status: "pending", show_publicly: true, hidden_by_admin: false, review_note: null, reviewed_at: null, created_at: ago(20) },
+    ],
     banners: [
       {
         id: newId(),
@@ -255,6 +269,18 @@ export function createDemoApi(): Api {
     isAdmin(u) || hasRole(u, "national") || hasRole(u, "regional", assoc) || hasRole(u, "institutional", assoc);
   const canViewMember = (u: string, inst: number) =>
     isAdmin(u) || hasRole(u, "national") || hasRole(u, "regional", assocOf(inst)) || hasRole(u, "institutional", null, inst);
+  const canVerify = (u: string, inst: number) =>
+    isAdmin(u) || hasRole(u, "regional", assocOf(inst)) || hasRole(u, "institutional", null, inst);
+  /** Delete a login and profile; their roles and feedback go too, posts and churches stay without the name. */
+  const removeAccount = (id: string) => {
+    s.users = s.users.filter((x) => x.id !== id);
+    s.profiles = s.profiles.filter((x) => x.id !== id);
+    s.roles = s.roles.filter((x) => x.user_id !== id);
+    s.feedback = (s.feedback ?? []).filter((x) => x.user_id !== id);
+  };
+  const isActiveLeader = (u: string) => s.roles.some((r) => r.user_id === u && isRoleActive(r));
+  const canReviewPast = (u: string, r: PastRole) =>
+    r.user_id !== u && (isAdmin(u) || (r.level !== "national" && hasRole(u, "regional", r.association_id)));
   const requireAdmin = () => {
     const u = me();
     if (!isAdmin(u)) throw new Error("Administrator permission required.");
@@ -265,7 +291,7 @@ export function createDemoApi(): Api {
     mode: "demo",
 
     async getDirectory() {
-      return { ...directory, institutions: [...directory.institutions] };
+      return { associations: [...directory.associations], counties: [...directory.counties], institutions: [...directory.institutions] };
     },
 
     async getStats() {
@@ -321,6 +347,9 @@ export function createDemoApi(): Api {
         expected_completion_year: input.expected_completion_year,
         terms_accepted_at: now(),
         created_at: now(),
+        verification: "pending",
+        verified_at: null,
+        verification_note: null,
       });
       if (input.leader_level && input.leader_position) {
         s.roles.push({
@@ -379,6 +408,10 @@ export function createDemoApi(): Api {
       const oldInst = p.institution_id;
       Object.assign(p, patch);
       if (patch.institution_id && patch.institution_id !== oldInst) {
+        // the new campus's leaders confirm them again
+        p.verification = "pending";
+        p.verified_at = null;
+        p.verification_note = null;
         const movedAssoc = assocOf(patch.institution_id) !== assocOf(oldInst);
         s.roles.forEach((r) => {
           if (r.user_id !== u || !["pending", "approved"].includes(r.status)) return;
@@ -396,6 +429,7 @@ export function createDemoApi(): Api {
       const u = me();
       const p = profileOf(u);
       if (!p) throw new Error("Complete your profile first.");
+      if (p.verification === "declined") throw new Error("A leader could not confirm your membership, so you can't do this. Contact MSAK through Help & feedback.");
       const held = s.roles.find((r) => r.user_id === u && r.level === level && ["pending", "approved"].includes(r.status));
       if (held?.status === "pending") throw new Error(`You already have a ${level} request waiting for approval.`);
       if (held) {
@@ -456,6 +490,13 @@ export function createDemoApi(): Api {
       if (r.status === "pending") {
         r.status = approve ? "approved" : "rejected";
         r.term_ends_on = approve ? academicYearEnd(addDays(today, 30)) : null;
+        // approving a leader also confirms them as a member
+        const person = profileOf(r.user_id);
+        if (approve && person && person.verification !== "verified") {
+          person.verification = "verified";
+          person.verified_at = now();
+          person.verification_note = null;
+        }
       } else {
         // renewal: approving extends to the next 31 August; declining lets the term run out
         if (approve) {
@@ -489,17 +530,19 @@ export function createDemoApi(): Api {
       const myInst = p?.institution_id ?? null;
       const myAssoc = assocOf(myInst);
       const alumni = isAlumni(p);
+      const confirmed = p?.verification === "verified";
       return s.announcements
         .filter(
           (a) =>
             a.audience === "national" ||
-            (a.audience === "alumni" && alumni) ||
-            (a.audience === "regional" && a.association_id === myAssoc) ||
-            (a.audience === "institutional" && a.institution_id === myInst && !alumni) ||
             a.author_id === u ||
             isAdmin(u) ||
+            (confirmed &&
+              ((a.audience === "alumni" && alumni) ||
+            (a.audience === "regional" && a.association_id === myAssoc) ||
+            (a.audience === "institutional" && a.institution_id === myInst && !alumni) ||
             ((a.audience === "regional" || a.audience === "institutional") && hasRole(u, "regional", a.association_id)) ||
-            hasRole(u, "national"),
+            hasRole(u, "national"))),
         )
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
@@ -570,6 +613,7 @@ export function createDemoApi(): Api {
     async saveChurch(input, id) {
       const u = me();
       const manager = canManageChurches(u, input.association_id);
+      if (!id && profileOf(u)?.verification === "declined") throw new Error("A leader could not confirm your membership, so you can't do this. Contact MSAK through Help & feedback.");
       if (id) {
         const c = s.churches.find((x) => x.id === id);
         if (!c) throw new Error("Church not found.");
@@ -601,6 +645,29 @@ export function createDemoApi(): Api {
       save();
     },
 
+    profilePhotoUrl(path) {
+      return path ?? null;
+    },
+
+    async uploadProfilePhoto(file) {
+      const p = profileOf(me());
+      if (!p) throw new Error("Profile not found.");
+      p.photo_path = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      save();
+    },
+
+    async removeProfilePhoto() {
+      const p = profileOf(me());
+      if (!p) throw new Error("Profile not found.");
+      p.photo_path = null;
+      save();
+    },
+
     async uploadChurchPhoto(file) {
       me();
       return await new Promise<string>((resolve, reject) => {
@@ -613,6 +680,7 @@ export function createDemoApi(): Api {
 
     async reportChurch(churchId, message) {
       const u = me();
+      if (profileOf(u)?.verification === "declined") throw new Error("A leader could not confirm your membership, so you can't do this. Contact MSAK through Help & feedback.");
       if (!profileOf(u) && !isAdmin(u)) throw new Error("You don't have permission to do that.");
       if (message.trim().length < 5) throw new Error("Tell us what's wrong (at least 5 characters).");
       s.reports = s.reports ?? [];
@@ -639,7 +707,8 @@ export function createDemoApi(): Api {
     },
 
     async listDocuments() {
-      me();
+      const u = me();
+      if (!isAdmin(u) && profileOf(u)?.verification !== "verified") return [];
       return [...s.documents].sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
 
@@ -691,8 +760,9 @@ export function createDemoApi(): Api {
       return s.feedback.filter((f) => isAdmin(u) || f.user_id === u).sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
 
-    async listMembers() {
+    async listMembers(opts = {}) {
       const u = me();
+      const withEmails = !!opts.emails && isAdmin(u);
       return s.profiles
         .filter((p) => p.id === u || canViewMember(u, p.institution_id))
         .map((p) => ({
@@ -704,6 +774,8 @@ export function createDemoApi(): Api {
               (r.user_id === u || isAdmin(u) || (r.level === "institutional" && hasRole(u, "regional", r.association_id))),
           ),
           isAdmin: s.admins.includes(p.id) && (isAdmin(u) || p.id === u),
+          email: withEmails ? (s.users.find((x) => x.id === p.id)?.email ?? null) : undefined,
+          pastRoles: isAdmin(u) || isActiveLeader(u) ? (s.pastRoles ?? []).filter((r) => r.user_id === p.id && r.status === "confirmed") : [],
         }))
         .sort((a, b) => a.full_name.localeCompare(b.full_name));
     },
@@ -751,6 +823,356 @@ export function createDemoApi(): Api {
       directory.institutions.push({ id: nextId, county_id: countyId, name: name.trim() });
     },
 
+    async reviewMember(memberId, approve, note) {
+      const u = me();
+      const p = profileOf(memberId);
+      if (!p) throw new Error("Profile not found.");
+      if (memberId === u) throw new Error("You cannot confirm your own membership.");
+      if (!canVerify(u, p.institution_id)) throw new Error("You are not allowed to confirm this member.");
+      const why = note?.trim() ?? "";
+      if (!approve && why.length < 3) throw new Error("Say briefly why you are declining (at least 3 characters).");
+      if (!approve && (isAdmin(memberId) || s.roles.some((r) => r.user_id === memberId && isRoleActive(r)))) {
+        throw new Error("This member holds an active leader role. Revoke the role first.");
+      }
+      p.verification = approve ? "verified" : "declined";
+      p.verified_at = now();
+      p.verification_note = why.slice(0, 300) || null;
+      save();
+    },
+
+    async removeDeclinedAccount(memberId) {
+      const u = requireAdmin();
+      if (memberId === u || isAdmin(memberId)) throw new Error("Administrator accounts cannot be removed here.");
+      if (profileOf(memberId)?.verification !== "declined") throw new Error("Only members a leader has declined can be removed.");
+      removeAccount(memberId);
+      save();
+    },
+
+    async purgeDeclinedAccounts() {
+      requireAdmin();
+      const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const ids = s.profiles.filter((p) => p.verification === "declined" && (p.verified_at ?? "") < cutoff && !isAdmin(p.id)).map((p) => p.id);
+      ids.forEach(removeAccount);
+      if (ids.length) save();
+      return ids.length;
+    },
+
+    async listPastRoles() {
+      const u = me();
+      return (s.pastRoles ?? []).filter(
+        (r) => r.user_id === u || isAdmin(u) || canReviewPast(u, r) || (r.status === "confirmed" && isActiveLeader(u)),
+      );
+    },
+
+    async addPastRole(i) {
+      const u = me();
+      const p = profileOf(u);
+      if (!p) throw new Error("Complete your profile first.");
+      if (p.verification === "declined") throw new Error("A leader could not confirm your membership, so you can't do this. Contact MSAK through Help & feedback.");
+      if (i.to_year < i.from_year) throw new Error("The end year must be the same as or after the start year.");
+      if (i.to_year - i.from_year > 10) throw new Error("A single position can cover at most 10 years; add separate entries.");
+      if (i.position.trim().length < 2) throw new Error("Enter the position (2–100 characters).");
+      if (i.to_year > Number(kenyaToday().slice(0, 4))) throw new Error("Past positions must have ended by this year.");
+      const assoc = i.level === "institutional" ? (i.institution_id ? assocOf(i.institution_id) : null) : i.level === "regional" ? i.association_id : null;
+      if (i.level === "institutional" && !i.institution_id) throw new Error("Choose the institution.");
+      if (i.level === "regional" && !assoc) throw new Error("Choose the association.");
+      s.pastRoles = s.pastRoles ?? [];
+      s.pastRoles.unshift({
+        id: newId(), user_id: u, level: i.level, association_id: assoc ?? null,
+        institution_id: i.level === "institutional" ? i.institution_id : null,
+        position: i.position.trim(), from_year: i.from_year, to_year: i.to_year,
+        status: "pending", show_publicly: i.show_publicly, hidden_by_admin: false, review_note: null, reviewed_at: null, created_at: now(),
+      });
+      save();
+    },
+
+    async updatePastRole(id, i) {
+      const u = me();
+      const r = (s.pastRoles ?? []).find((x) => x.id === id && x.user_id === u);
+      if (!r) throw new Error("That entry was not found.");
+      if (i.to_year < i.from_year) throw new Error("The end year must be the same as or after the start year.");
+      if (i.to_year - i.from_year > 10) throw new Error("A single position can cover at most 10 years; add separate entries.");
+      if (i.position.trim().length < 2) throw new Error("Enter the position (2–100 characters).");
+      if (i.to_year > Number(kenyaToday().slice(0, 4))) throw new Error("Past positions must have ended by this year.");
+      const assoc = i.level === "institutional" ? (i.institution_id ? assocOf(i.institution_id) : null) : i.level === "regional" ? i.association_id : null;
+      if (i.level === "institutional" && !i.institution_id) throw new Error("Choose the institution.");
+      if (i.level === "regional" && !assoc) throw new Error("Choose the association.");
+      Object.assign(r, {
+        level: i.level,
+        association_id: assoc ?? null,
+        institution_id: i.level === "institutional" ? i.institution_id : null,
+        position: i.position.trim(),
+        from_year: i.from_year,
+        to_year: i.to_year,
+        show_publicly: i.level === "institutional" ? false : i.show_publicly,
+        status: "pending",
+        review_note: null,
+        reviewed_at: null,
+      });
+      save();
+    },
+
+    async updateLeaderRequest(id, position) {
+      const u = me();
+      const r = s.roles.find((x) => x.id === id && x.user_id === u && x.status === "pending");
+      if (!r) throw new Error("Only your own requests that are still waiting can be changed.");
+      if (position.trim().length < 2 || position.trim().length > 100) throw new Error("Enter your position (2–100 characters).");
+      r.position = position.trim();
+      r.requested_at = now();
+      save();
+    },
+
+    async withdrawLeaderRequest(id) {
+      const u = me();
+      const before = s.roles.length;
+      s.roles = s.roles.filter((x) => !(x.id === id && x.user_id === u && x.status === "pending"));
+      if (s.roles.length === before) throw new Error("Only your own requests that are still waiting can be withdrawn.");
+      save();
+      emit();
+    },
+
+    async removePastRole(id) {
+      const u = me();
+      const before = (s.pastRoles ?? []).length;
+      s.pastRoles = (s.pastRoles ?? []).filter((r) => !(r.id === id && (r.user_id === u || isAdmin(u))));
+      if (s.pastRoles.length === before) throw new Error("That entry was not found.");
+      save();
+    },
+
+    async setPastRolePublic(id, show) {
+      const u = me();
+      const r = (s.pastRoles ?? []).find((x) => x.id === id && x.user_id === u);
+      if (!r) throw new Error("That entry was not found.");
+      r.show_publicly = show;
+      save();
+    },
+
+    async reviewPastRole(id, confirm, note) {
+      const u = me();
+      const r = (s.pastRoles ?? []).find((x) => x.id === id);
+      if (!r) throw new Error("That entry was not found.");
+      if (!canReviewPast(u, r)) throw new Error("You are not allowed to confirm this.");
+      const why = note?.trim() ?? "";
+      if (!confirm && why.length < 3) throw new Error("Say briefly why you are declining (at least 3 characters).");
+      r.status = confirm ? "confirmed" : "declined";
+      r.review_note = why.slice(0, 300) || null;
+      r.reviewed_at = now();
+      save();
+    },
+
+    async adminHidePastRole(id, hidden) {
+      requireAdmin();
+      const r = (s.pastRoles ?? []).find((x) => x.id === id);
+      if (!r) throw new Error("That entry was not found.");
+      r.hidden_by_admin = hidden;
+      save();
+    },
+
+    async getPastLeadersPublic() {
+      return s.settings?.past_leaders_public !== false;
+    },
+
+    async setPastLeadersPublic(on) {
+      requireAdmin();
+      s.settings = { ...(s.settings ?? {}), past_leaders_public: on };
+      save();
+    },
+
+    async publicPastLeaders(): Promise<PublicPastLeader[]> {
+      return (s.pastRoles ?? [])
+        .filter((r) => s.settings?.past_leaders_public !== false && r.status === "confirmed" && r.show_publicly && !r.hidden_by_admin && r.level !== "institutional")
+        .map((r) => {
+          const a = r.association_id ? directory.associations.find((x) => x.id === r.association_id) : undefined;
+          return {
+            full_name: profileOf(r.user_id)?.full_name ?? "",
+            level: r.level as "regional" | "national",
+            association_code: a?.code ?? null,
+            association_name: a?.name ?? null,
+            title: r.position,
+            from_year: r.from_year,
+            to_year: r.to_year,
+          };
+        })
+        .sort((x, y) => y.to_year - x.to_year || y.from_year - x.from_year || (x.level === "national" ? -1 : 1));
+    },
+
+    async adminUpdateProfile(id, patch) {
+      requireAdmin();
+      const p = profileOf(id);
+      if (!p) throw new Error("Member not found.");
+      if (patch.verification === "declined" && s.roles.some((r) => r.user_id === id && isRoleActive(r))) {
+        throw new Error("This member holds an active leader role. Revoke the role first.");
+      }
+      const changedStatus = patch.verification !== p.verification;
+      Object.assign(p, { ...patch, full_name: patch.full_name.trim(), phone: patch.phone.trim(), course: patch.course.trim() });
+      if (changedStatus) {
+        p.verified_at = now();
+        p.verification_note = patch.verification === "declined" ? "Set by an administrator" : null;
+      }
+      save();
+      emit();
+    },
+    async adminDeleteMember(id) {
+      const u = requireAdmin();
+      if (id === u || isAdmin(id)) throw new Error("Administrator accounts cannot be removed here.");
+      if (!profileOf(id)) throw new Error("Member not found.");
+      removeAccount(id);
+      save();
+    },
+    async adminAssignRole(memberId, r) {
+      requireAdmin();
+      const p = profileOf(memberId);
+      if (!p) throw new Error("Member not found.");
+      if (r.position.trim().length < 2) throw new Error("Enter the position (2–100 characters).");
+      const assoc = r.level === "institutional" ? (r.institution_id ? assocOf(r.institution_id) : null) : r.level === "regional" ? r.association_id : null;
+      if (r.level === "institutional" && !r.institution_id) throw new Error("Choose the institution.");
+      if (r.level === "regional" && !assoc) throw new Error("Choose the association.");
+      s.roles.push({
+        id: newId(), user_id: memberId, level: r.level, position: r.position.trim(),
+        association_id: r.level === "national" ? null : assoc, institution_id: r.level === "institutional" ? r.institution_id : null,
+        status: "approved", requested_at: now(), reviewed_at: now(), review_note: "Assigned by an administrator",
+        term_ends_on: r.term_ends_on ?? academicYearEnd(addDays(kenyaToday(), 30)), renewal_requested_at: null,
+      });
+      p.verification = "verified";
+      save();
+      emit();
+    },
+    async adminUpdateRole(roleId, r) {
+      requireAdmin();
+      const role = s.roles.find((x) => x.id === roleId);
+      if (!role) throw new Error("That role was not found.");
+      if (r.position.trim().length < 2) throw new Error("Enter the position (2–100 characters).");
+      const assoc = r.level === "institutional" ? (r.institution_id ? assocOf(r.institution_id) : null) : r.level === "regional" ? r.association_id : null;
+      if (r.level === "institutional" && !r.institution_id) throw new Error("Choose the institution.");
+      if (r.level === "regional" && !assoc) throw new Error("Choose the association.");
+      Object.assign(role, {
+        level: r.level, position: r.position.trim(), association_id: r.level === "national" ? null : assoc,
+        institution_id: r.level === "institutional" ? r.institution_id : null, status: r.status,
+        term_ends_on: r.status === "approved" ? (r.term_ends_on ?? role.term_ends_on ?? academicYearEnd(addDays(kenyaToday(), 30))) : r.term_ends_on,
+        renewal_requested_at: r.status === "approved" ? role.renewal_requested_at : null, reviewed_at: now(),
+      });
+      save();
+      emit();
+    },
+    async adminDeleteRole(roleId) {
+      requireAdmin();
+      const before = s.roles.length;
+      s.roles = s.roles.filter((x) => x.id !== roleId);
+      if (s.roles.length === before) throw new Error("That role was not found.");
+      save();
+      emit();
+    },
+    async adminUpdatePastRole(id, i) {
+      requireAdmin();
+      const r = (s.pastRoles ?? []).find((x) => x.id === id);
+      if (!r) throw new Error("That entry was not found.");
+      if (i.to_year < i.from_year || i.to_year - i.from_year > 10) throw new Error("Check the years (end on or after start, at most 10 years).");
+      const assoc = i.level === "institutional" ? (i.institution_id ? assocOf(i.institution_id) : null) : i.level === "regional" ? i.association_id : null;
+      Object.assign(r, {
+        level: i.level, association_id: i.level === "national" ? null : assoc, institution_id: i.level === "institutional" ? i.institution_id : null,
+        position: i.position.trim(), from_year: i.from_year, to_year: i.to_year, status: i.status,
+        show_publicly: i.level !== "institutional" && i.show_publicly, reviewed_at: now(),
+      });
+      save();
+    },
+    async updateAnnouncement(id, title, body) {
+      requireAdmin();
+      const a = s.announcements.find((x) => x.id === id);
+      if (!a) throw new Error("Announcement not found.");
+      if (title.trim().length < 3 || title.trim().length > 160) throw new Error("Title must be 3–160 characters.");
+      if (!body.trim()) throw new Error("Message must be 1–5000 characters.");
+      a.title = title.trim();
+      a.body = body.trim();
+      save();
+    },
+    async updateDocument(id, title, description) {
+      requireAdmin();
+      const d = s.documents.find((x) => x.id === id);
+      if (!d) throw new Error("Document not found.");
+      if (title.trim().length < 3) throw new Error("Title must be 3–160 characters.");
+      d.title = title.trim();
+      d.description = description.trim() || null;
+      save();
+    },
+    async deleteFeedback(id) {
+      requireAdmin();
+      s.feedback = s.feedback.filter((x) => x.id !== id);
+      save();
+    },
+    async deleteChurchReport(id) {
+      requireAdmin();
+      s.reports = (s.reports ?? []).filter((x) => x.id !== id);
+      save();
+    },
+    async addAssociation(code, name) {
+      requireAdmin();
+      if (directory.associations.some((a) => a.code === code.trim().toUpperCase())) throw new Error("That already exists.");
+      directory.associations.push({ id: Math.max(...directory.associations.map((a) => a.id)) + 1, code: code.trim().toUpperCase(), name: name.trim() });
+    },
+    async updateAssociation(id, code, name) {
+      requireAdmin();
+      const a = directory.associations.find((x) => x.id === id);
+      if (!a) throw new Error("Not found.");
+      a.code = code.trim().toUpperCase();
+      a.name = name.trim();
+    },
+    async deleteAssociation(id) {
+      requireAdmin();
+      if (directory.counties.some((c) => c.association_id === id) || s.churches.some((c) => c.association_id === id)) {
+        throw new Error("This is still in use (members, churches, posts or roles are linked to it), so it can't be deleted. Move those first.");
+      }
+      directory.associations = directory.associations.filter((a) => a.id !== id);
+    },
+    async addCounty(associationId, name) {
+      requireAdmin();
+      directory.counties.push({ id: Math.max(...directory.counties.map((c) => c.id)) + 1, association_id: associationId, name: name.trim() });
+    },
+    async updateCounty(id, associationId, name) {
+      requireAdmin();
+      const c = directory.counties.find((x) => x.id === id);
+      if (!c) throw new Error("Not found.");
+      c.association_id = associationId;
+      c.name = name.trim();
+    },
+    async deleteCounty(id) {
+      requireAdmin();
+      if (directory.institutions.some((i) => i.county_id === id) || s.churches.some((c) => c.county_id === id)) {
+        throw new Error("This is still in use (members, churches, posts or roles are linked to it), so it can't be deleted. Move those first.");
+      }
+      directory.counties = directory.counties.filter((c) => c.id !== id);
+    },
+    async updateInstitution(id, countyId, name) {
+      requireAdmin();
+      const i = directory.institutions.find((x) => x.id === id);
+      if (!i) throw new Error("Not found.");
+      i.county_id = countyId;
+      i.name = name.trim();
+    },
+    async deleteInstitution(id) {
+      requireAdmin();
+      if (s.profiles.some((p) => p.institution_id === id) || s.roles.some((r) => r.institution_id === id)) {
+        throw new Error("This is still in use (members, churches, posts or roles are linked to it), so it can't be deleted. Move those first.");
+      }
+      directory.institutions = directory.institutions.filter((i) => i.id !== id);
+    },
+
+    async adminChangeEmail(memberId, email) {
+      requireAdmin();
+      const p = profileOf(memberId);
+      const user = s.users.find((x) => x.id === memberId);
+      if (!p || !user) throw new Error("Member not found.");
+      const next = email.trim().toLowerCase();
+      if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(next)) throw new Error("That email address doesn't look right.");
+      if (s.users.some((x) => x.id !== memberId && x.email.toLowerCase() === next)) throw new Error("Another account already uses that email.");
+      user.email = next;
+      save();
+    },
+
+    async countPendingMembers() {
+      const u = me();
+      return s.profiles.filter((p) => p.id !== u && p.verification === "pending" && canViewMember(u, p.institution_id)).length;
+    },
+
     async adminDashboard(): Promise<AdminDashboard> {
       requireAdmin();
       const today = kenyaToday();
@@ -762,14 +1184,15 @@ export function createDemoApi(): Api {
         months.push(m.toISOString().slice(0, 7));
       }
       const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      const counted = s.profiles.filter((p) => p.verification !== "declined");
       return {
-        members: s.profiles.length,
-        students: s.profiles.filter((p) => !isAlumni(p)).length,
-        alumni: s.profiles.filter(isAlumni).length,
+        members: counted.length,
+        students: counted.filter((p) => !isAlumni(p)).length,
+        alumni: counted.filter(isAlumni).length,
         by_association: [...directory.associations]
           .sort((a, b) => a.code.localeCompare(b.code))
           .map((a) => {
-            const ps = s.profiles.filter((p) => assocOf(p.institution_id) === a.id);
+            const ps = counted.filter((p) => assocOf(p.institution_id) === a.id);
             const cs = s.churches.filter((c) => c.association_id === a.id && c.status === "published");
             return {
               association_id: a.id,
@@ -781,7 +1204,7 @@ export function createDemoApi(): Api {
               churches_confirmed: cs.filter((c) => c.location_verified).length,
             };
           }),
-        signups: months.map((month) => ({ month, count: s.profiles.filter((p) => p.created_at.slice(0, 7) === month).length })),
+        signups: months.map((month) => ({ month, count: counted.filter((p) => p.created_at.slice(0, 7) === month).length })),
         leaders: {
           national: active.filter((r) => r.level === "national").length,
           regional: active.filter((r) => r.level === "regional").length,
@@ -850,6 +1273,35 @@ export function createDemoApi(): Api {
     saveBanner: ["home_banners", "update"],
     deleteBanner: ["home_banners", "delete"],
     addInstitution: ["institutions", "insert"],
+    reviewMember: ["profiles", "update"],
+    removeDeclinedAccount: ["profiles", "delete"],
+    adminChangeEmail: ["profiles", "update"],
+    adminUpdateProfile: ["profiles", "update"],
+    adminDeleteMember: ["profiles", "delete"],
+    adminAssignRole: ["leader_roles", "insert"],
+    adminUpdateRole: ["leader_roles", "update"],
+    adminDeleteRole: ["leader_roles", "delete"],
+    adminUpdatePastRole: ["past_roles", "update"],
+    updateAnnouncement: ["announcements", "update"],
+    updateDocument: ["documents", "update"],
+    deleteFeedback: ["feedback", "delete"],
+    deleteChurchReport: ["church_reports", "delete"],
+    addAssociation: ["associations", "insert"],
+    updateAssociation: ["associations", "update"],
+    deleteAssociation: ["associations", "delete"],
+    addCounty: ["counties", "insert"],
+    updateCounty: ["counties", "update"],
+    deleteCounty: ["counties", "delete"],
+    updateInstitution: ["institutions", "update"],
+    deleteInstitution: ["institutions", "delete"],
+    addPastRole: ["past_roles", "insert"],
+    reviewPastRole: ["past_roles", "update"],
+    removePastRole: ["past_roles", "delete"],
+    adminHidePastRole: ["past_roles", "update"],
+    setPastLeadersPublic: ["site_settings", "update"],
+    updatePastRole: ["past_roles", "update"],
+    updateLeaderRequest: ["leader_roles", "update"],
+    withdrawLeaderRequest: ["leader_roles", "delete"],
   };
   const summarise = (args: unknown[]): string | null => {
     for (const a of args) {

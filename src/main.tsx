@@ -6,6 +6,10 @@ import "leaflet/dist/leaflet.css";
 import "./index.css";
 import { App } from "./App";
 import { installErrorReporting } from "./lib/errorReporting";
+import { applyPortalTheme } from "./lib/theme";
+
+// open the portal in the saved appearance straight away (no white flash before dark mode)
+if (location.pathname.startsWith("/app")) applyPortalTheme(true);
 
 // Installable app + offline support. Updates apply automatically on the next visit.
 registerSW({ immediate: true });

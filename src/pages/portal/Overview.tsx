@@ -5,12 +5,12 @@ import { api } from "../../lib/api";
 import { useMe } from "../../lib/auth";
 import { usePortal } from "../../lib/portal";
 import { distanceKm, formatKm, getCurrentPosition } from "../../lib/geo";
-import { levelLabel } from "../../lib/format";
+import { formatDate, levelLabel } from "../../lib/format";
 import type { Announcement, Church, LeaderRoleWithPerson } from "../../lib/types";
 import { AnnouncementItem } from "../../components/Announcements";
 import { InstallPrompt } from "../../components/InstallPrompt";
 import { Alert, EmptyState, StatusBadge } from "../../components/ui";
-import { isAlumni, roleState } from "../../lib/academic";
+import { isAlumni, isRoleActive, roleState } from "../../lib/academic";
 
 export function OverviewPage() {
   const me = useMe();
@@ -27,13 +27,56 @@ export function OverviewPage() {
   const pendingMine = me.roles.filter((r) => r.status === "pending");
   const expiredMine = me.roles.filter((r) => roleState(r) === "expired");
   const alumni = isAlumni(profile);
+  // "You're now alumni" notice: hidden once they confirm (tied to the completion year, so it returns if that changes)
+  const alumniKey = `msak-alumni-ok-${me.userId}-${profile?.expected_completion_year ?? ""}`;
+  const [alumniOk, setAlumniOk] = useState(() => {
+    try {
+      return !!localStorage.getItem(alumniKey);
+    } catch {
+      return false;
+    }
+  });
+  const confirmAlumni = () => {
+    try {
+      localStorage.setItem(alumniKey, "yes");
+    } catch {
+      /* ignore */
+    }
+    setAlumniOk(true);
+  };
+  // Alumni: ask once whether they served as leaders (hidden after they add one or say no)
+  const promptKey = `msak-past-prompt-${me.userId}`;
+  const [askPast, setAskPast] = useState(false);
+  useEffect(() => {
+    if (!alumni || profile?.verification === "declined") return;
+    try {
+      if (localStorage.getItem(promptKey)) return;
+    } catch {
+      /* ignore */
+    }
+    api
+      .listPastRoles()
+      .then((rows) => setAskPast(!rows.some((r) => r.user_id === me.userId)))
+      .catch(() => setAskPast(false));
+  }, [alumni, profile?.verification, promptKey, me.userId]);
+  const dismissPast = () => {
+    try {
+      localStorage.setItem(promptKey, "no");
+    } catch {
+      /* ignore */
+    }
+    setAskPast(false);
+  };
+  const [newMembers, setNewMembers] = useState(0);
+  const canConfirmMembers = me.isAdmin || me.roles.some((r) => isRoleActive(r) && r.level !== "national");
 
   useEffect(() => {
     document.title = "Overview — MSAK";
     api.listAnnouncements().then(setFeed).catch(() => setFeed([]));
     api.listChurches().then(setChurches).catch(() => setChurches([]));
     if (perms.canReviewLeaders) api.listLeaderRoles().then(setRequests).catch(() => setRequests([]));
-  }, [perms.canReviewLeaders]);
+    if (canConfirmMembers) api.countPendingMembers().then(setNewMembers).catch(() => setNewMembers(0));
+  }, [perms.canReviewLeaders, canConfirmMembers]);
 
   async function findNearest() {
     setLocError(null);
@@ -69,25 +112,88 @@ export function OverviewPage() {
       {expiredMine.length > 0 && (
         <Alert tone="warn">
           Your {expiredMine.map((r) => `${levelLabel[r.level].toLowerCase()} ${r.position}`).join(" and ")} role ended on 31 August.{" "}
-          <Link to="/app/profile" className="font-semibold">
+          <Link to="/app/leadership" className="font-semibold">
             Renew it for this year
           </Link>{" "}
           to post again — your approver will confirm it.
         </Alert>
       )}
-      {alumni && (
+      {alumni && !alumniOk && (
         <Alert tone="info">
-          You're now alumni. You'll get national, regional and alumni announcements. Still studying?{" "}
+          <span className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              You're now alumni (completion year {profile?.expected_completion_year}). You'll get national, regional and alumni announcements.
+            </span>
+            <span className="flex flex-none flex-wrap gap-2">
+              <button type="button" className="btn btn-primary btn-sm" onClick={confirmAlumni}>
+                Yes, I've completed
+              </button>
+              <Link to="/app/profile" className="btn btn-outline btn-sm no-underline">
+                No, I'm still studying
+              </Link>
+            </span>
+          </span>
+        </Alert>
+      )}
+      {askPast && (
+        <section aria-labelledby="ask-past-h" className="card flex flex-col gap-3 border-gold-500 bg-gold-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="ask-past-h" className="font-serif text-xl font-semibold text-navy-900">
+              Did you serve as an MSAK leader?
+            </h2>
+            <p className="mt-1 text-sm text-body">
+              Add positions you held on your campus, in your region or nationally, with the years. A leader confirms them, and you can choose to
+              appear on the public Past leaders page.
+            </p>
+          </div>
+          <div className="flex flex-none flex-wrap gap-2">
+            <Link to="/app/past-leadership#past-leadership" className="btn btn-primary btn-sm no-underline">
+              Add past leadership
+            </Link>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={dismissPast}>
+              No, I didn't
+            </button>
+          </div>
+        </section>
+      )}
+      {!profile && !me.isAdmin && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
+      {profile?.verification === "pending" && (
+        <Alert tone="info">
+          <strong>Welcome!</strong> A leader at {lookup.institution(profile.institution_id)?.name ?? "your campus"} or in {assoc?.code ?? "your association"} will
+          confirm that you study there. Until then you'll see national announcements; campus and regional ones and the documents open once you're
+          confirmed.
+        </Alert>
+      )}
+      {profile?.verification === "declined" && (
+        <Alert tone="warn">
+          A leader couldn't confirm you as a student at {lookup.institution(profile.institution_id)?.name ?? "your campus"}
+          {profile.verification_note ? <> (“{profile.verification_note}”)</> : null}. If your institution is wrong,{" "}
           <Link to="/app/profile" className="font-semibold">
-            Update your completion year
+            correct it in My profile
+          </Link>{" "}
+          and you'll be checked again; otherwise tell us in{" "}
+          <Link to="/app/feedback" className="font-semibold">
+            Help & feedback
           </Link>
+          . Until then you can't request a leader role or suggest churches
+          {profile.verified_at
+            ? `, and unless a leader reverses this, your account will be removed on ${formatDate(new Date(Date.parse(profile.verified_at) + 30 * 86_400_000).toISOString())}`
+            : ""}
           .
         </Alert>
       )}
-      {!profile && !me.isAdmin && <Alert tone="warn">Your profile wasn't found. Please contact an administrator.</Alert>}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-6">
+          {newMembers > 0 && (
+            <Link to="/app/members" className="card flex items-center justify-between gap-3 border-gold-500 bg-gold-50 px-5 py-4 no-underline">
+              <span>
+                <span className="block font-serif text-xl font-semibold text-navy-900">New members to confirm: {newMembers}</span>
+                <span className="block text-[13px] text-body">Check they really study at their campus, then confirm them.</span>
+              </span>
+              <span className="btn btn-primary btn-sm flex-none">Review</span>
+            </Link>
+          )}
           {perms.canReviewLeaders && pendingRequests.length > 0 && (
             <section aria-labelledby="req-h" className="card overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">

@@ -97,17 +97,17 @@
   .btn-primary:hover:not(:disabled) { background: var(--color-navy-800); }
   .btn-gold { background: var(--color-gold-500); color: var(--color-navy-900); }
   .btn-gold:hover:not(:disabled) { background: var(--color-gold-300); }
-  .btn-outline { background: #fff; color: var(--color-navy-900); border-color: var(--color-line-strong); }
+  .btn-outline { background: var(--surface, #fff); color: var(--color-navy-900); border-color: var(--color-line-strong); }
   .btn-outline:hover:not(:disabled) { border-color: var(--color-navy-900); }
   .btn-ghost { background: transparent; color: var(--color-navy-900); }
   .btn-ghost:hover:not(:disabled) { background: var(--color-gold-100); }
-  .btn-danger { background: #fff; color: var(--color-danger); border-color: #f0c7c2; }
+  .btn-danger { background: var(--surface, #fff); color: var(--color-danger); border-color: #f0c7c2; }
   .btn-danger:hover:not(:disabled) { border-color: var(--color-danger); }
   .btn-on-dark { background: transparent; color: #fff; border-color: var(--color-navy-500); }
   .btn-on-dark:hover:not(:disabled) { border-color: #fff; }
 
   .card {
-    background: #fff;
+    background: var(--surface, #fff);
     border: 1px solid var(--color-line);
     border-radius: 8px;
   }
@@ -127,7 +127,7 @@
     padding: 10px 14px;
     border: 1px solid var(--color-line-strong);
     border-radius: 6px;
-    background: #fff;
+    background: var(--surface, #fff);
     color: var(--color-ink);
     font: inherit;
     font-size: 16px; /* 16px stops iOS zooming into fields */
@@ -173,3 +173,58 @@
 .leaflet-container { isolation: isolate; }
 /* Grouped church pins */
 .leaflet-marker-icon.msak-cluster { display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #0b1f4d; color: #e3c27a; font: 700 14px/1 var(--font-sans); border: 3px solid #c9a04a; box-shadow: 0 0 0 6px rgba(201, 160, 74, 0.3), 0 4px 10px rgba(0, 0, 0, 0.35); }
+
+/* ---------------------------------------------------------------------------
+   Dark appearance for the member portal (Settings → Appearance).
+   The portal puts "msak-dark" on <html> while it's open; public pages stay light.
+   Brand navy stays for the sidebar; pages, cards and text flip to dark surfaces.
+--------------------------------------------------------------------------- */
+html.msak-dark {
+  color-scheme: dark;
+  --surface: #131e3a;
+  --color-ivory: #0a1124;
+  --color-paper: #0f1930;
+  --color-line: #263252;
+  --color-line-strong: #3b4a70;
+  --color-ink: #edf0f7;
+  --color-body: #c5ccdc;
+  --color-muted: #9da7be;
+  --color-danger: #f3897e;
+  --color-success: #5fcb97;
+  --color-gold-50: #231e12;
+  --color-gold-100: #2e2715;
+  --color-gold-700: #dcb867;
+  --color-gold-800: #e8c983;
+  --color-navy-50: #1b2848;
+}
+html.msak-dark .bg-white { background-color: var(--surface); }
+html.msak-dark .bg-white\/90 { background-color: rgb(19 30 58 / 0.92); }
+html.msak-dark :is(.text-navy-950, .text-navy-900, .text-navy-800, .text-navy-700) { color: var(--color-ink); }
+/* navy text on gold stays navy (counters, gold pills) */
+html.msak-dark .bg-gold-500:is(.text-navy-950, .text-navy-900),
+html.msak-dark .bg-gold-500 :is(.text-navy-950, .text-navy-900) { color: var(--color-navy-900); }
+html.msak-dark :is(.border-navy-900, .border-navy-100) { border-color: var(--color-line-strong); }
+html.msak-dark .btn-primary { background: var(--color-gold-500); color: var(--color-navy-950); }
+html.msak-dark .btn-primary:hover:not(:disabled) { background: var(--color-gold-300); }
+html.msak-dark :is(.btn-outline, .btn-ghost) { color: var(--color-ink); }
+html.msak-dark .btn-outline:hover:not(:disabled) { border-color: var(--color-gold-500); }
+html.msak-dark .btn-danger { border-color: #6b2a25; }
+html.msak-dark .input:focus { border-color: var(--color-gold-500); }
+html.msak-dark .badge-region { color: var(--color-navy-200); }
+html.msak-dark .badge-alumni { background: #2d2140; color: #d8b9f3; }
+html.msak-dark .badge-pending { border-color: #5a4a22; }
+html.msak-dark .badge-ok { background: #15392a; }
+html.msak-dark .badge-muted { background: #1f2a45; }
+/* light tints written as fixed colours */
+html.msak-dark .bg-\[\#f1eee5\] { background-color: #1b2645; }
+html.msak-dark :is(.bg-\[\#fdecea\], .bg-\[\#fdf3f2\], .bg-\[\#fbe9e7\]) { background-color: #3a1c1b; }
+html.msak-dark :is(.bg-\[\#e3f3ea\], .bg-\[\#e6f2ea\]) { background-color: #15392a; }
+html.msak-dark :is(.border-\[\#f0c7c2\], .border-\[\#f3c2bd\]) { border-color: #6b2a25; }
+html.msak-dark .border-\[\#bfe3cf\] { border-color: #24563f; }
+html.msak-dark .border-\[\#ebd9ae\] { border-color: #5a4a22; }
+html.msak-dark .border-\[\#efebe0\],
+html.msak-dark .divide-\[\#efebe0\] > * { border-color: var(--color-line); }
+html.msak-dark .accent-\[\#0B1F4D\] { accent-color: var(--color-gold-500); }
+html.msak-dark .leaflet-container { background: #1b2645; }
+html.msak-dark :is(.leaflet-popup-content-wrapper, .leaflet-popup-tip) { background: var(--surface); color: var(--color-ink); }
+html.msak-dark :is(.leaflet-bar a, .leaflet-control-layers) { background: var(--surface); color: var(--color-ink); border-color: var(--color-line); }

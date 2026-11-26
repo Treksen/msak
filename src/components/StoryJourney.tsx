@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Photo } from "./Photo";
+import { usePastLeadersPublic } from "../lib/pastLeadersSetting";
 
 type Stop = { numeral: string; year: string; label: string; title: string; text: string; photo?: string; alt?: string };
 
@@ -66,6 +67,7 @@ const YS = [60, 120, 60, 120, 60, 120];
  * chapter cards. Swipe or scroll the cards (native scroll-snap), or tap a stop / the arrows.
  */
 export function StoryJourney() {
+  const pastLeadersOn = usePastLeadersPublic();
   const [i, setI] = useState(0);
   const track = useRef<HTMLDivElement>(null);
   const cards = useRef<(HTMLElement | null)[]>([]);
@@ -219,6 +221,15 @@ export function StoryJourney() {
             Stop {i + 1} of {STOPS.length} · swipe
           </span>
         </div>
+
+        {pastLeadersOn && (
+        <p className="mt-8">
+          <Link to="/past-leaders" className="inline-flex items-center gap-1.5 font-semibold text-gold-300 no-underline hover:text-gold-200">
+            Meet the leaders who carried the lamp
+            <ChevronRight className="size-4" aria-hidden="true" />
+          </Link>
+        </p>
+        )}
       </div>
     </section>
   );

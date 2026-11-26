@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { api, errorMessage } from "../lib/api";
 import { audienceLabel, timeAgo } from "../lib/format";
 import { shortInstitution, type Lookup } from "../lib/directory";
@@ -11,16 +11,23 @@ export function AnnouncementItem({
   a,
   lookup,
   canDelete,
+  canEdit,
   onDeleted,
   compact,
 }: {
   a: Announcement;
   lookup: Lookup;
   canDelete: boolean;
+  /** Administrators can correct the title and message. */
+  canEdit?: boolean;
   onDeleted?: () => void;
   compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(a.title);
+  const [body, setBody] = useState(a.body);
+  const [editError, setEditError] = useState<string | null>(null);
   const scope =
     a.audience === "institutional"
       ? shortInstitution(lookup.institution(a.institution_id)?.name)
@@ -35,12 +42,53 @@ export function AnnouncementItem({
           {scope} · {timeAgo(a.created_at)}
         </span>
       </div>
-      <h3 className="text-base font-bold leading-snug text-ink">{a.title}</h3>
-      {!compact && <p className="whitespace-pre-line text-sm leading-relaxed text-body">{a.body}</p>}
+      {editing ? (
+        <form
+          className="mt-1 flex flex-col gap-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setEditError(null);
+            try {
+              await api.updateAnnouncement(a.id, title, body);
+              setEditing(false);
+              onDeleted?.();
+            } catch (err) {
+              setEditError(errorMessage(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} />
+          <TextArea label="Message" value={body} onChange={(e) => setBody(e.target.value)} rows={6} maxLength={5000} />
+          {editError && <Alert tone="error">{editError}</Alert>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+              Save changes
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <h3 className="text-base font-bold leading-snug text-ink">{a.title}</h3>
+          {!compact && <p className="whitespace-pre-line text-sm leading-relaxed text-body">{a.body}</p>}
+        </>
+      )}
       <div className="flex items-center justify-between gap-2 pt-1">
         <p className="text-xs text-muted">
           {a.author_name} · {a.author_title}
         </p>
+        <span className="flex gap-1">
+        {canEdit && !editing && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
+            <Pencil className="size-4" aria-hidden="true" />
+            Edit
+          </button>
+        )}
         {canDelete && (
           <button
             type="button"
@@ -62,6 +110,7 @@ export function AnnouncementItem({
             Delete
           </button>
         )}
+        </span>
       </div>
     </article>
   );

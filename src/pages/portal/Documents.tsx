@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Download, FileText, Trash2, Upload } from "lucide-react";
+import { Download, FileText, Pencil, Trash2, Upload } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { usePortal } from "../../lib/portal";
 import { formatBytes, formatDate } from "../../lib/format";
 import type { DocumentItem } from "../../lib/types";
 import { Alert, EmptyState, Modal, PageHeader, Spinner, TextArea, TextInput } from "../../components/ui";
+import { useMe } from "../../lib/auth";
 
 export function DocumentsPage() {
   const { perms } = usePortal();
+  const me = useMe();
+  const waiting = !perms.isAdmin && me.profile?.verification !== "verified";
+  const [editingDoc, setEditingDoc] = useState<DocumentItem | null>(null);
   const [docs, setDocs] = useState<DocumentItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -47,6 +51,11 @@ export function DocumentsPage() {
       >
         Constitutions, guidelines and forms shared with members.
       </PageHeader>
+      {waiting && (
+        <div className="mb-4">
+          <Alert tone="info">The document library opens once a leader confirms your membership.</Alert>
+        </div>
+      )}
       {error && <Alert tone="error">{error}</Alert>}
       {docs === null ? (
         <Spinner />
@@ -70,6 +79,11 @@ export function DocumentsPage() {
                   Open
                 </button>
                 {perms.isAdmin && (
+                  <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${d.title}`} onClick={() => setEditingDoc(d)}>
+                    <Pencil className="size-4" aria-hidden="true" />
+                  </button>
+                )}
+                {perms.isAdmin && (
                   <button
                     type="button"
                     className="btn btn-danger btn-sm"
@@ -92,6 +106,18 @@ export function DocumentsPage() {
           ))}
         </ul>
       )}
+
+      <Modal open={!!editingDoc} title="Edit document details" onClose={() => setEditingDoc(null)}>
+        {editingDoc && (
+          <EditDocForm
+            doc={editingDoc}
+            onDone={() => {
+              setEditingDoc(null);
+              load();
+            }}
+          />
+        )}
+      </Modal>
 
       <Modal open={uploadOpen} title="Upload a document" onClose={() => setUploadOpen(false)}>
         <UploadForm
@@ -134,6 +160,40 @@ function UploadForm({ onDone }: { onDone: () => void }) {
       <div className="flex justify-end">
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? "Uploading…" : "Upload"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function EditDocForm({ doc, onDone }: { doc: DocumentItem; onDone: () => void }) {
+  const [title, setTitle] = useState(doc.title);
+  const [description, setDescription] = useState(doc.description ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError(null);
+        try {
+          await api.updateDocument(doc.id, title, description);
+          onDone();
+        } catch (err) {
+          setError(errorMessage(err));
+          setBusy(false);
+        }
+      }}
+    >
+      <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} />
+      <TextArea label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={500} />
+      <p className="text-[13px] text-muted">To replace the file itself, upload the new version and delete this one.</p>
+      {error && <Alert tone="error">{error}</Alert>}
+      <div className="flex justify-end">
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save"}
         </button>
       </div>
     </form>

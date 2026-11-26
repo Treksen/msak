@@ -5,6 +5,8 @@ import type {
   Announcement,
   Church,
   ChurchReport,
+  PastRole,
+  PublicPastLeader,
   AdminDashboard,
   AuditEntry,
   ErrorEntry,
@@ -110,6 +112,33 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
       check(await sb.from("profiles").update(patch).eq("id", id));
     },
 
+    profilePhotoUrl(path) {
+      return path ? sb.storage.from("profile-photos").getPublicUrl(path).data.publicUrl : null;
+    },
+
+    async uploadProfilePhoto(file) {
+      const id = await uid();
+      const old = (check(await sb.from("profiles").select("photo_path").eq("id", id).maybeSingle()) as { photo_path: string | null } | null)
+        ?.photo_path;
+      const path = `${id}/${crypto.randomUUID()}.jpg`;
+      check(await sb.storage.from("profile-photos").upload(path, file, { contentType: "image/jpeg", upsert: false, cacheControl: "31536000" }));
+      try {
+        check(await sb.from("profiles").update({ photo_path: path }).eq("id", id));
+      } catch (e) {
+        await sb.storage.from("profile-photos").remove([path]);
+        throw e;
+      }
+      if (old) await sb.storage.from("profile-photos").remove([old]); // tidy up; ignore failures
+    },
+
+    async removeProfilePhoto() {
+      const id = await uid();
+      const old = (check(await sb.from("profiles").select("photo_path").eq("id", id).maybeSingle()) as { photo_path: string | null } | null)
+        ?.photo_path;
+      check(await sb.from("profiles").update({ photo_path: null }).eq("id", id));
+      if (old) await sb.storage.from("profile-photos").remove([old]);
+    },
+
     async requestLeaderRole(level, position) {
       check(await sb.rpc("request_leader_role", { p_level: level, p_position: position }));
     },
@@ -192,6 +221,27 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
       check(await sb.from("church_reports").update({ status: "resolved" }).eq("id", id));
     },
 
+    async reviewMember(memberId, approve, note) {
+      check(await sb.rpc("review_member", { p_member: memberId, p_approve: approve, p_note: note ?? null }));
+    },
+
+    async countPendingMembers() {
+      const { data: auth } = await sb.auth.getUser();
+      let q = sb.from("profiles").select("id", { count: "exact", head: true }).eq("verification", "pending");
+      if (auth.user) q = q.neq("id", auth.user.id);
+      const { count, error } = await q;
+      if (error) throw error;
+      return count ?? 0;
+    },
+
+    async removeDeclinedAccount(memberId) {
+      check(await sb.rpc("remove_declined_account", { p_member: memberId }));
+    },
+
+    async purgeDeclinedAccounts() {
+      return Number(check(await sb.rpc("purge_declined_accounts")) ?? 0);
+    },
+
     async adminDashboard() {
       return check(await sb.rpc("admin_dashboard")) as AdminDashboard;
     },
@@ -268,12 +318,19 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
       return (rows ?? []) as FeedbackItem[];
     },
 
-    async listMembers() {
-      const [p, r, a] = await Promise.all([
+    async listMembers(opts = {}) {
+      const [p, r, a, e] = await Promise.all([
         sb.from("profiles").select("*").order("full_name").range(0, 4999),
         sb.from("leader_roles").select("*").in("status", ["pending", "approved"]),
         sb.from("admins").select("user_id"),
+        opts.emails ? sb.rpc("admin_member_emails") : Promise.resolve({ data: [], error: null }),
       ]);
+      // confirmed past leadership (readable by active leaders and admins; empty for others)
+      const past = await sb.from("past_roles").select("*").eq("status", "confirmed");
+      const pastRows = ((past.error ? [] : past.data) ?? []) as PastRole[];
+      // If the email function isn't in the database yet (migration 11), still show the members — just without emails.
+      const emailsMissing = !!opts.emails && !!e.error;
+      const emails = new Map((((e.error ? [] : e.data) ?? []) as { id: string; email: string }[]).map((x) => [x.id, x.email]));
       const profiles = (check(p) ?? []) as Profile[];
       const roles = (check(r) ?? []) as LeaderRole[];
       const admins = new Set(((check(a) ?? []) as { user_id: string }[]).map((x) => x.user_id));
@@ -281,7 +338,183 @@ export function createSupabaseApi(sb: SupabaseClient): Api {
         ...pr,
         roles: roles.filter((x) => x.user_id === pr.id),
         isAdmin: admins.has(pr.id),
+        email: opts.emails && !emailsMissing ? (emails.get(pr.id) ?? null) : undefined,
+        pastRoles: pastRows.filter((x) => x.user_id === pr.id),
       }));
+    },
+
+    async listPastRoles() {
+      return (check(await sb.from("past_roles").select("*").order("to_year", { ascending: false }).limit(2000)) ?? []) as PastRole[];
+    },
+
+    async addPastRole(i) {
+      check(
+        await sb.rpc("add_past_role", {
+          p_level: i.level,
+          p_institution_id: i.institution_id,
+          p_association_id: i.association_id,
+          p_position: i.position,
+          p_from: i.from_year,
+          p_to: i.to_year,
+          p_show_publicly: i.show_publicly,
+        }),
+      );
+    },
+
+    async updatePastRole(id, i) {
+      check(
+        await sb.rpc("update_past_role", {
+          p_id: id,
+          p_level: i.level,
+          p_institution_id: i.institution_id,
+          p_association_id: i.association_id,
+          p_position: i.position,
+          p_from: i.from_year,
+          p_to: i.to_year,
+        }),
+      );
+      if (i.level !== "institutional") check(await sb.rpc("set_past_role_public", { p_id: id, p_show: i.show_publicly }));
+    },
+
+    async updateLeaderRequest(id, position) {
+      check(await sb.rpc("update_leader_request", { p_role_id: id, p_position: position }));
+    },
+
+    async withdrawLeaderRequest(id) {
+      check(await sb.rpc("withdraw_leader_request", { p_role_id: id }));
+    },
+
+    async removePastRole(id) {
+      check(await sb.rpc("remove_past_role", { p_id: id }));
+    },
+
+    async setPastRolePublic(id, show) {
+      check(await sb.rpc("set_past_role_public", { p_id: id, p_show: show }));
+    },
+
+    async reviewPastRole(id, confirm, note) {
+      check(await sb.rpc("review_past_role", { p_id: id, p_confirm: confirm, p_note: note ?? null }));
+    },
+
+    async adminHidePastRole(id, hidden) {
+      check(await sb.rpc("admin_hide_past_role", { p_id: id, p_hidden: hidden }));
+    },
+
+    async getPastLeadersPublic() {
+      const { data, error } = await sb.from("site_settings").select("value").eq("key", "past_leaders_public").maybeSingle();
+      if (error) return true; // setting not set up yet: page stays on
+      return data ? data.value !== false : true;
+    },
+
+    async setPastLeadersPublic(on) {
+      check(await sb.from("site_settings").upsert({ key: "past_leaders_public", value: on, updated_at: new Date().toISOString() }));
+    },
+
+    async publicPastLeaders() {
+      return (check(await sb.rpc("public_past_leaders")) ?? []) as PublicPastLeader[];
+    },
+
+    async adminUpdateProfile(id, p) {
+      check(
+        await sb.rpc("admin_update_profile", {
+          p_member: id,
+          p_full_name: p.full_name,
+          p_gender: p.gender,
+          p_phone: p.phone,
+          p_institution_id: p.institution_id,
+          p_course: p.course,
+          p_admission_year: p.admission_year,
+          p_year_of_study: p.year_of_study,
+          p_expected_completion_year: p.expected_completion_year,
+          p_verification: p.verification,
+        }),
+      );
+    },
+    async adminDeleteMember(id) {
+      check(await sb.rpc("admin_delete_member", { p_member: id }));
+    },
+    async adminAssignRole(memberId, r) {
+      check(
+        await sb.rpc("admin_assign_role", {
+          p_member: memberId,
+          p_level: r.level,
+          p_position: r.position,
+          p_association_id: r.association_id,
+          p_institution_id: r.institution_id,
+          p_term_ends_on: r.term_ends_on,
+        }),
+      );
+    },
+    async adminUpdateRole(roleId, r) {
+      check(
+        await sb.rpc("admin_update_role", {
+          p_role_id: roleId,
+          p_level: r.level,
+          p_position: r.position,
+          p_association_id: r.association_id,
+          p_institution_id: r.institution_id,
+          p_status: r.status,
+          p_term_ends_on: r.term_ends_on,
+        }),
+      );
+    },
+    async adminDeleteRole(roleId) {
+      check(await sb.rpc("admin_delete_role", { p_role_id: roleId }));
+    },
+    async adminUpdatePastRole(id, i) {
+      check(
+        await sb.rpc("admin_update_past_role", {
+          p_id: id,
+          p_level: i.level,
+          p_institution_id: i.institution_id,
+          p_association_id: i.association_id,
+          p_position: i.position,
+          p_from: i.from_year,
+          p_to: i.to_year,
+          p_status: i.status,
+          p_show_publicly: i.show_publicly,
+        }),
+      );
+    },
+    async updateAnnouncement(id, title, body) {
+      check(await sb.from("announcements").update({ title: title.trim(), body: body.trim() }).eq("id", id));
+    },
+    async updateDocument(id, title, description) {
+      check(await sb.from("documents").update({ title: title.trim(), description: description.trim() || null }).eq("id", id));
+    },
+    async deleteFeedback(id) {
+      check(await sb.from("feedback").delete().eq("id", id));
+    },
+    async deleteChurchReport(id) {
+      check(await sb.from("church_reports").delete().eq("id", id));
+    },
+    async addAssociation(code, name) {
+      check(await sb.from("associations").insert({ code: code.trim().toUpperCase(), name: name.trim() }));
+    },
+    async updateAssociation(id, code, name) {
+      check(await sb.from("associations").update({ code: code.trim().toUpperCase(), name: name.trim() }).eq("id", id));
+    },
+    async deleteAssociation(id) {
+      check(await sb.from("associations").delete().eq("id", id));
+    },
+    async addCounty(associationId, name) {
+      check(await sb.from("counties").insert({ association_id: associationId, name: name.trim() }));
+    },
+    async updateCounty(id, associationId, name) {
+      check(await sb.from("counties").update({ association_id: associationId, name: name.trim() }).eq("id", id));
+    },
+    async deleteCounty(id) {
+      check(await sb.from("counties").delete().eq("id", id));
+    },
+    async updateInstitution(id, countyId, name) {
+      check(await sb.from("institutions").update({ county_id: countyId, name: name.trim() }).eq("id", id));
+    },
+    async deleteInstitution(id) {
+      check(await sb.from("institutions").delete().eq("id", id));
+    },
+
+    async adminChangeEmail(memberId, email) {
+      check(await sb.rpc("admin_change_email", { p_member: memberId, p_email: email }));
     },
 
     async setAdmin(userId, isAdmin) {

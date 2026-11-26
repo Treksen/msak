@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type Context, type ReactNode } from "react";
 import { api } from "./api";
 import type { Audience, Directory, LeaderLevel, LeaderRole, Me } from "./types";
 import { isRoleActive } from "./academic";
@@ -12,7 +12,10 @@ type AuthState = {
   reloadDirectory: () => Promise<void>;
 };
 
-const AuthContext = createContext<AuthState | null>(null);
+// One context for the whole visit. In development, Vite can hot-reload this file on its own; keeping the
+// context on globalThis stops that from causing "useAuth must be used inside <AuthProvider>".
+const holder = globalThis as { __msakAuthContext?: Context<AuthState | null> };
+const AuthContext = (holder.__msakAuthContext ??= createContext<AuthState | null>(null));
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null | undefined>(undefined);

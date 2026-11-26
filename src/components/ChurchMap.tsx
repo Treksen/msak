@@ -210,6 +210,13 @@ function Remeasure() {
       clearTimeout(t1);
       clearTimeout(t2);
       ro.disconnect();
+      // Leaving the page mid-animation (fly/zoom to the churches) would make Leaflet finish moving a map
+      // that no longer exists ("_leaflet_pos" error). Stop it first.
+      try {
+        map.stop();
+      } catch {
+        /* already gone */
+      }
     };
   }, [map]);
   return null;

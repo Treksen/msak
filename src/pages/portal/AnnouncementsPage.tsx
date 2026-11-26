@@ -55,6 +55,11 @@ export function AnnouncementsPage() {
       >
         From your campus, your association and the national office.
       </PageHeader>
+      {me.profile && me.profile.verification !== "verified" && (
+        <div className="mb-4">
+          <Alert tone="info">You'll see campus and regional announcements once a leader confirms your membership. National ones are below.</Alert>
+        </div>
+      )}
 
       <div role="tablist" aria-label="Filter announcements" className="mb-4 inline-flex gap-1 rounded-md bg-[#f1eee5] p-1">
         {filters.filter((f) => f.id === "all" || (items ?? []).some((a) => a.audience === f.id)).map((f) => (
@@ -79,7 +84,7 @@ export function AnnouncementsPage() {
       ) : (
         <div className="card overflow-hidden">
           {shown.map((a) => (
-            <AnnouncementItem key={a.id} a={a} lookup={lookup} canDelete={a.author_id === me.userId || me.isAdmin} onDeleted={load} />
+            <AnnouncementItem key={a.id} a={a} lookup={lookup} canDelete={a.author_id === me.userId || me.isAdmin} canEdit={me.isAdmin} onDeleted={load} />
           ))}
         </div>
       )}

@@ -61,7 +61,11 @@ With no Supabase keys the app runs in **demo mode**: sample data lives in your b
 > `04_admin_accounts_migration.sql` (admin accounts without a profile), `05_home_banners_migration.sql`
 > (homepage event banner) and `06_terms_alumni_logs_migration.sql` (leadership terms, alumni, church reports &
 > photos, audit and error logs), `07_church_pins_fix.sql` (church pins from the old site's map) and
-> `08_admin_dashboard_migration.sql` (admin dashboard figures, log clean-up). A fresh setup with the current
+> `08_admin_dashboard_migration.sql` (admin dashboard figures, log clean-up), `09_mwihoko_pin.sql` and
+> `10_member_verification.sql` (leaders confirm new members) and `11_admin_member_emails.sql` (admins see and
+> correct login emails) and `12_past_leadership.sql` (past leadership and the public Past leaders page) and
+> `13_edit_leadership_requests.sql` (edit/withdraw leadership requests) and `14_admin_full_control.sql`
+> (administrators can edit and delete everything) and `15_past_leaders_visibility.sql` (hide past leaders). A fresh setup with the current
 > `01_schema.sql` and `02_seed.sql` doesn't need them.
 
 > Email: Supabase's built-in mailer is rate-limited (a few emails per hour). Before launch, add an SMTP provider
@@ -125,6 +129,58 @@ automatically loses their campus role (and regional role if the association chan
   domain (without it, Vercel's production domain is used).
 - **Tell Google about the site:** open Google Search Console, add your site address, verify it (the DNS or HTML-tag
   option), then under **Sitemaps** submit `sitemap.xml`. Pages usually appear in results within days to a few weeks.
+
+## 4f. Confirming new members
+
+- New sign-ups start as **waiting**. Their campus leaders, the regional leaders of their association, or an admin
+  confirm them under **Members** (a gold "Waiting for confirmation" panel, with a count on the menu). "Not a student"
+  needs a short reason, which the member sees.
+- While waiting (or declined) a member sees **national announcements only**; campus, regional and alumni
+  announcements and the document library open once they are confirmed.
+- Approving someone's leader request also confirms them. Moving to another institution sends a member back to
+  waiting for the new campus. Everyone registered before migration 10 counts as confirmed.
+- Confirmations and declines appear in the Activity log.
+- **Declined members** keep a limited account (national announcements, the church map, their profile and Help &
+  feedback) but can't request leader roles or suggest/report churches. They don't count as members on the dashboard
+  and aren't in the CSV export; leaders find them under the **Declined** filter, where they can still confirm them.
+  A leader can't decline someone who holds an active leader role (revoke the role first) or an administrator.
+- Admins can **Remove account** for a declined member (deletes the login and profile). Declined accounts are also
+  removed automatically **30 days** after the decision: daily by Supabase's scheduler (`pg_cron`; turn it on in
+  Database → Extensions *before* running migration 10, or run the migration again afterwards), and whenever an admin
+  opens the dashboard.
+
+## 4g. Correcting a member's email (administrators)
+
+Members → each member's login email shows under their name (admins only; also searchable and in the admin's CSV).
+**Change email** fixes a mistyped address: the member logs in with the new one and their usual password, and
+password resets go there. Check the new address with the member first. Each change is in the Activity log.
+
+## 4h. Alumni and past leadership
+
+- Registration asks **"Are you still studying?"** — graduates choose "I've completed my studies" and join as alumni.
+- Alumni see **"Did you serve as an MSAK leader?"** on their dashboard; anyone can add past positions under
+  **My profile → Past leadership** (level, campus/association, position, years). Each is sent for confirmation:
+  regional leaders confirm campus and regional positions in their association (in **Leader approvals**); the
+  admin confirms national ones. Past positions are history only — no posting rights.
+- Confirmed national and regional positions appear on the public **Past leaders** page (`/past-leaders`, linked
+  from "Our story" and the footer) only if the member ticked "show my name". Leaders and admins see confirmed
+  history next to members in **Members**.
+- Admins control the public page: **Hide from public** on any confirmed entry (overrides the member's choice), and a
+  **Public Past leaders page On/Off** switch at the top of Leader approvals → Past leaders. When off, the page shows
+  a notice and its links are removed.
+- In **My profile**, a leader request that is still waiting can be **edited** (position title) or **withdrawn**;
+  past leadership entries can be **edited** at any time and go back for confirmation.
+
+## 4i. Administrators: edit and delete anything
+
+- **Members → Manage** (per member): edit every profile field and the membership status; assign, edit (level,
+  campus/association, position, status, term end) or delete leader roles; edit or delete past leadership; delete
+  the account. **Change email** fixes the login address.
+- **Announcements**: Edit (title, message) and Delete. **Documents**: edit title/description, delete.
+- **Administration → Member feedback**: delete messages. **Churches → Reported problems**: delete reports.
+- **Administration → Directory** (`/app/admin/directory`): add, rename, move or delete institutions, counties and
+  associations. Anything still linked to members, churches or roles can't be deleted until it's moved.
+- Churches, homepage banners and admins were already fully editable. Every change is in the Activity log.
 
 ## 5. The church map
 

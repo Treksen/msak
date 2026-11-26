@@ -1288,3 +1288,1023 @@ end;
 $$;
 revoke all on function public.purge_logs(integer) from public, anon;
 grant execute on function public.purge_logs(integer) to authenticated;
+
+-- =====================================================================
+-- 13 · Member confirmation (same as 10_member_verification.sql)
+-- =====================================================================
+-- - New members start as "pending". Their campus leaders, the regional leaders of their association, or an
+--   admin confirm them ("verified") or decline them ("declined"). Approving a leader request also confirms.
+-- - While pending (or declined) a member sees national announcements only; campus, regional and alumni
+--   announcements and the document library open once they are confirmed.
+-- - Moving to another institution sends a member back to "pending" for the new campus to confirm.
+-- - Members who registered before this change are counted as confirmed (done once, when the column is added).
+-- - Declined members can't request leader roles, suggest or report churches, and don't count in the dashboard.
+--   Admins can remove their account; it is removed automatically 30 days after the decision.
+-- Safe to run more than once.
+
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'profiles' and column_name = 'verification') then
+    alter table public.profiles
+      add column verification text not null default 'pending' check (verification in ('pending', 'verified', 'declined')),
+      add column verified_at timestamptz,
+      add column verified_by uuid references auth.users (id) on delete set null,
+      add column verification_note text check (char_length(verification_note) <= 300);
+    -- everyone already registered keeps their access
+    update public.profiles set verification = 'verified', verified_at = now();
+  end if;
+end $$;
+
+create index if not exists profiles_pending_idx on public.profiles (institution_id) where verification = 'pending';
+
+-- ---------- Helpers ----------------------------------------------------------------
+create or replace function public.i_am_verified()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce((select p.verification = 'verified' from public.profiles p where p.id = auth.uid()), false);
+$$;
+
+/** Campus leaders of that institution, regional leaders of its association, and admins. */
+create or replace function public.can_verify_member(p_institution_id bigint)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select public.is_admin()
+    or public.has_role('regional', public.institution_association_id(p_institution_id))
+    or public.has_role('institutional', null, p_institution_id);
+$$;
+
+revoke all on function public.i_am_verified() from public;
+revoke all on function public.can_verify_member(bigint) from public;
+grant execute on function public.i_am_verified() to authenticated;
+grant execute on function public.can_verify_member(bigint) to authenticated;
+
+-- ---------- Confirm / decline (defined further down, with the declined-member rules) -------------
+
+-- ---------- Moving campus: back to pending ------------------------------------------------
+create or replace function public.profiles_reverify_on_move()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.institution_id is distinct from old.institution_id and new.verification <> 'pending' then
+    new.verification := 'pending';
+    new.verified_at := null;
+    new.verified_by := null;
+    new.verification_note := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists profiles_reverify on public.profiles;
+create trigger profiles_reverify before update of institution_id on public.profiles
+  for each row execute function public.profiles_reverify_on_move();
+
+-- Log confirmations in the activity log too.
+drop trigger if exists audit_profiles_upd on public.profiles;
+create trigger audit_profiles_upd after update of institution_id, expected_completion_year, verification on public.profiles
+  for each row execute function public.audit_row();
+
+-- ---------- Approving a leader also confirms them as a member ------------------------------
+create or replace function public.review_leader_role(p_role_id uuid, p_approve boolean, p_note text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  r public.leader_roles;
+begin
+  select * into r from public.leader_roles where id = p_role_id for update;
+  if not found or not (r.status = 'pending' or (r.status = 'approved' and r.renewal_requested_at is not null)) then
+    raise exception 'That request is no longer waiting.' using errcode = 'P0002';
+  end if;
+  if r.user_id = v_uid then
+    raise exception 'You cannot review your own request.' using errcode = '42501';
+  end if;
+  if not (public.is_admin() or (r.level = 'institutional' and public.has_role('regional', r.association_id))) then
+    raise exception 'You are not allowed to review this request.' using errcode = '42501';
+  end if;
+
+  if r.status = 'pending' then
+    update public.leader_roles
+       set status = case when p_approve then 'approved' else 'rejected' end,
+           term_ends_on = case when p_approve then public.academic_year_end(public.kenya_today() + 30) else null end,
+           reviewed_by = v_uid, reviewed_at = now(),
+           review_note = nullif(btrim(coalesce(p_note, '')), '')
+     where id = p_role_id;
+    if p_approve then
+      update public.profiles
+         set verification = 'verified', verified_by = v_uid, verified_at = now(), verification_note = null
+       where id = r.user_id and verification <> 'verified';
+    end if;
+  else
+    -- Renewal: approving extends the term to the next 31 August; declining leaves it to run out.
+    update public.leader_roles
+       set term_ends_on = case when p_approve
+                               then public.academic_year_end(greatest(public.kenya_today(), coalesce(term_ends_on, public.kenya_today()) + 1))
+                               else term_ends_on end,
+           renewal_requested_at = null,
+           reviewed_by = v_uid, reviewed_at = now(),
+           review_note = nullif(btrim(coalesce(p_note, '')), '')
+     where id = p_role_id;
+  end if;
+end;
+$$;
+
+-- ---------- What unconfirmed members can read ----------------------------------------------
+drop policy if exists "Read announcements for my audience" on public.announcements;
+create policy "Read announcements for my audience" on public.announcements for select to authenticated
+  using (
+    public.is_admin()
+    or (public.is_member() and (
+      audience = 'national'
+      or author_id = (select auth.uid())
+      or (public.i_am_verified() and (
+        (audience = 'alumni' and public.i_am_alumni())
+        or (audience = 'regional' and association_id = public.my_association_id())
+        or (audience = 'institutional' and institution_id = public.my_institution_id() and not public.i_am_alumni())
+        or (audience in ('regional', 'institutional') and public.has_role('regional', association_id))
+        or public.has_role('national')
+      ))
+    ))
+  );
+
+drop policy if exists "Members read documents" on public.documents;
+create policy "Members read documents" on public.documents for select to authenticated
+  using (public.i_am_verified() or public.is_admin());
+
+drop policy if exists "Members download documents" on storage.objects;
+create policy "Members download documents" on storage.objects for select to authenticated
+  using (bucket_id = 'documents' and (public.i_am_verified() or public.is_admin()));
+
+-- ---------- Declined members: limits, removal --------------------------------------------
+-- A leader can't decline someone who is an approved leader or an administrator (revoke the role first).
+create or replace function public.review_member(p_member uuid, p_approve boolean, p_note text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  p public.profiles;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  select * into p from public.profiles where id = p_member for update;
+  if not found then
+    raise exception 'Profile not found.' using errcode = 'P0002';
+  end if;
+  if p_member = v_uid then
+    raise exception 'You cannot confirm your own membership.' using errcode = '42501';
+  end if;
+  if not public.can_verify_member(p.institution_id) then
+    raise exception 'You are not allowed to confirm this member.' using errcode = '42501';
+  end if;
+  if not p_approve then
+    if coalesce(char_length(v_note), 0) < 3 then
+      raise exception 'Say briefly why you are declining (at least 3 characters).' using errcode = '22023';
+    end if;
+    if exists (select 1 from public.admins a where a.user_id = p_member)
+       or exists (select 1 from public.leader_roles r
+                   where r.user_id = p_member and r.status = 'approved'
+                     and (r.term_ends_on is null or r.term_ends_on >= public.kenya_today())) then
+      raise exception 'This member holds an active leader role. Revoke the role first.' using errcode = '42501';
+    end if;
+  end if;
+  update public.profiles
+     set verification = case when p_approve then 'verified' else 'declined' end,
+         verified_by = v_uid,
+         verified_at = now(),
+         verification_note = left(v_note, 300)
+   where id = p_member;
+end;
+$$;
+
+revoke all on function public.review_member(uuid, boolean, text) from public, anon;
+grant execute on function public.review_member(uuid, boolean, text) to authenticated;
+
+create or replace function public.i_am_declined()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.verification = 'declined');
+$$;
+revoke all on function public.i_am_declined() from public;
+grant execute on function public.i_am_declined() to authenticated;
+
+-- Declined members can't ask for leader roles, suggest churches or report churches.
+create or replace function public.block_declined_members()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if public.i_am_declined() then
+    raise exception 'A leader could not confirm your membership, so you can''t do this. Contact MSAK through Help & feedback.'
+      using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists leader_roles_block_declined on public.leader_roles;
+create trigger leader_roles_block_declined before insert on public.leader_roles
+  for each row execute function public.block_declined_members();
+drop trigger if exists churches_block_declined on public.churches;
+create trigger churches_block_declined before insert on public.churches
+  for each row execute function public.block_declined_members();
+drop trigger if exists church_reports_block_declined on public.church_reports;
+create trigger church_reports_block_declined before insert on public.church_reports
+  for each row execute function public.block_declined_members();
+
+-- Admins: delete a declined member's login and profile completely (their roles and feedback go too;
+-- posts, churches and reports they touched stay, without their name).
+create or replace function public.remove_declined_account(p_member uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can remove accounts.' using errcode = '42501';
+  end if;
+  if p_member = auth.uid() or exists (select 1 from public.admins a where a.user_id = p_member) then
+    raise exception 'Administrator accounts cannot be removed here.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.profiles p where p.id = p_member and p.verification = 'declined') then
+    raise exception 'Only members a leader has declined can be removed.' using errcode = '42501';
+  end if;
+  delete from public.profiles where id = p_member;   -- logged in the activity log
+  delete from auth.users where id = p_member;
+end;
+$$;
+revoke all on function public.remove_declined_account(uuid) from public, anon;
+grant execute on function public.remove_declined_account(uuid) to authenticated;
+
+-- Declined for 30 days and nobody reversed it: remove the account. Run daily by the scheduler (below)
+-- and also whenever an administrator opens the dashboard. Returns how many accounts were removed.
+create or replace function public.purge_declined_accounts()
+returns integer language plpgsql security definer set search_path = '' as $$
+declare
+  v_ids uuid[];
+begin
+  if auth.uid() is not null and not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  select coalesce(array_agg(p.id), '{}') into v_ids
+    from public.profiles p
+   where p.verification = 'declined' and p.verified_at < now() - interval '30 days'
+     and not exists (select 1 from public.admins a where a.user_id = p.id);
+  delete from public.profiles where id = any (v_ids);
+  delete from auth.users where id = any (v_ids);
+  return coalesce(array_length(v_ids, 1), 0);
+end;
+$$;
+revoke all on function public.purge_declined_accounts() from public, anon;
+grant execute on function public.purge_declined_accounts() to authenticated;
+
+-- Daily at 04:15 Kenya time (01:15 UTC). Needs the pg_cron extension (Database → Extensions in Supabase);
+-- if it isn't available this step is skipped and the dashboard clean-up still works.
+do $cron$
+begin
+  begin
+    create extension if not exists pg_cron with schema pg_catalog;
+  exception when others then
+    raise notice 'pg_cron is not available (%). Declined accounts will be removed when an administrator opens the dashboard.', sqlerrm;
+    return;
+  end;
+  perform cron.schedule('msak-remove-declined-accounts', '15 1 * * *', 'select public.purge_declined_accounts()');
+exception when others then
+  raise notice 'Could not schedule the daily clean-up (%). It will still run when an administrator opens the dashboard.', sqlerrm;
+end $cron$;
+
+-- Dashboard figures leave out declined people.
+create or replace function public.admin_dashboard()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_today date := public.kenya_today();
+  v_out jsonb;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can see the dashboard.' using errcode = '42501';
+  end if;
+
+  with m as (
+    select p.id, p.created_at, c.association_id,
+           (v_today > make_date(p.expected_completion_year, 8, 31)) as alumni
+    from public.profiles p
+    join public.institutions i on i.id = p.institution_id
+    join public.counties c on c.id = i.county_id
+    where p.verification <> 'declined'   -- people a leader found not to be students don't count
+  ),
+  months as (
+    select to_char(d, 'YYYY-MM') as month
+    from generate_series(date_trunc('month', v_today::timestamp) - interval '11 months',
+                         date_trunc('month', v_today::timestamp), interval '1 month') d
+  )
+  select jsonb_build_object(
+    'members', (select count(*) from m),
+    'students', (select count(*) from m where not alumni),
+    'alumni', (select count(*) from m where alumni),
+    'by_association', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'association_id', a.id, 'code', a.code, 'name', a.name,
+               'students', (select count(*) from m where m.association_id = a.id and not m.alumni),
+               'alumni', (select count(*) from m where m.association_id = a.id and m.alumni),
+               'churches', (select count(*) from public.churches ch where ch.association_id = a.id and ch.status = 'published'),
+               'churches_confirmed', (select count(*) from public.churches ch where ch.association_id = a.id and ch.status = 'published' and ch.location_verified)
+             ) order by a.code), '[]'::jsonb)
+      from public.associations a
+    ),
+    'signups', (
+      select jsonb_agg(jsonb_build_object('month', months.month,
+               'count', (select count(*) from m where to_char(m.created_at at time zone 'Africa/Nairobi', 'YYYY-MM') = months.month))
+             order by months.month)
+      from months
+    ),
+    'leaders', jsonb_build_object(
+      'national', (select count(*) from public.leader_roles r where r.status = 'approved' and r.level = 'national' and (r.term_ends_on is null or r.term_ends_on >= v_today)),
+      'regional', (select count(*) from public.leader_roles r where r.status = 'approved' and r.level = 'regional' and (r.term_ends_on is null or r.term_ends_on >= v_today)),
+      'institutional', (select count(*) from public.leader_roles r where r.status = 'approved' and r.level = 'institutional' and (r.term_ends_on is null or r.term_ends_on >= v_today)),
+      'waiting', (select count(*) from public.leader_roles r where r.status = 'pending' or (r.status = 'approved' and r.renewal_requested_at is not null)),
+      'expired', (select count(*) from public.leader_roles r where r.status = 'approved' and r.term_ends_on < v_today)
+    ),
+    'churches_suggested', (select count(*) from public.churches where status = 'suggested'),
+    'open_reports', (select count(*) from public.church_reports where status = 'open'),
+    'errors_7d', (select count(*) from public.error_log where at > now() - interval '7 days'),
+    'activity_7d', (select count(*) from public.audit_log where at > now() - interval '7 days')
+  ) into v_out;
+  return v_out;
+end;
+$$;
+
+-- =====================================================================
+-- 14 · Admins see members' login emails and can correct one (same as 11_admin_member_emails.sql)
+-- =====================================================================
+-- Login emails live in Supabase's auth tables, which the app can't read. These two functions let
+-- administrators (only) list them next to members and change one when a member typed it wrong.
+-- The member then logs in with the corrected email and their usual password. Changes go in the Activity log.
+-- Safe to run more than once.
+
+create or replace function public.admin_member_emails()
+returns table (id uuid, email text)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can see members'' emails.' using errcode = '42501';
+  end if;
+  return query
+    select u.id, u.email::text from auth.users u join public.profiles p on p.id = u.id;
+end;
+$$;
+revoke all on function public.admin_member_emails() from public, anon;
+grant execute on function public.admin_member_emails() to authenticated;
+
+create or replace function public.admin_change_email(p_member uuid, p_email text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_email text := lower(btrim(coalesce(p_email, '')));
+  v_old text;
+  v_name text;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can change a member''s email.' using errcode = '42501';
+  end if;
+  select p.full_name into v_name from public.profiles p where p.id = p_member;
+  if v_name is null then
+    raise exception 'Member not found.' using errcode = 'P0002';
+  end if;
+  if v_email !~ '^[a-z0-9.!#$%&''*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$' then
+    raise exception 'That email address doesn''t look right.' using errcode = '22023';
+  end if;
+  select u.email into v_old from auth.users u where u.id = p_member;
+  if lower(v_old) = v_email then
+    return; -- nothing to change
+  end if;
+  if exists (select 1 from auth.users u where lower(u.email) = v_email and u.id <> p_member) then
+    raise exception 'Another account already uses that email.' using errcode = '23505';
+  end if;
+
+  update auth.users
+     set email = v_email,
+         email_confirmed_at = coalesce(email_confirmed_at, now()),  -- an admin vouches for it
+         updated_at = now()
+   where id = p_member;
+  -- the email sign-in identity keeps its own copy of the address
+  update auth.identities
+     set identity_data = jsonb_set(coalesce(identity_data, '{}'::jsonb), '{email}', to_jsonb(v_email)),
+         updated_at = now()
+   where user_id = p_member and provider = 'email';
+
+  insert into public.audit_log (actor_id, actor_label, action, entity, entity_id, summary, changes)
+  values (
+    v_uid,
+    coalesce((select 'Admin · ' || coalesce(p.full_name, u.email) from auth.users u left join public.profiles p on p.id = u.id where u.id = v_uid), 'Admin'),
+    'update', 'profiles', p_member::text, v_name,
+    jsonb_build_object('login email', v_email)
+  );
+end;
+$$;
+revoke all on function public.admin_change_email(uuid, text) from public, anon;
+grant execute on function public.admin_change_email(uuid, text) to authenticated;
+
+-- =====================================================================
+-- 15 · Past leadership (same as 12_past_leadership.sql)
+-- =====================================================================
+-- - Any member can add positions they held before (level, campus/association, position, years). Each one is a
+--   confirmation request. Past positions never give posting or approval rights.
+-- - Regional leaders confirm campus and regional positions in their association; administrators confirm any,
+--   and are the only ones who confirm national positions.
+-- - Confirmed national and regional positions appear on the public "Past leaders" page only if the member ticked
+--   "show me publicly" (their consent, per the Data Protection Act). Leaders and admins see confirmed ones in Members.
+-- Safe to run more than once.
+
+create table if not exists public.past_roles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  level text not null check (level in ('institutional', 'regional', 'national')),
+  association_id smallint references public.associations (id) on delete restrict,
+  institution_id bigint references public.institutions (id) on delete restrict,
+  position text not null check (length(btrim(position)) between 2 and 100),
+  from_year integer not null check (from_year between 1990 and 2100),
+  to_year integer not null check (to_year between 1990 and 2100),
+  status text not null default 'pending' check (status in ('pending', 'confirmed', 'declined')),
+  show_publicly boolean not null default false,
+  reviewed_by uuid references auth.users (id) on delete set null,
+  reviewed_at timestamptz,
+  review_note text check (review_note is null or length(review_note) <= 300),
+  created_at timestamptz not null default now(),
+  constraint past_roles_years_check check (to_year >= from_year and to_year - from_year <= 10),
+  constraint past_roles_scope_check check (
+    (level = 'institutional' and institution_id is not null and association_id is not null)
+    or (level = 'regional' and association_id is not null and institution_id is null)
+    or (level = 'national' and association_id is null and institution_id is null)
+  )
+);
+create index if not exists past_roles_user_idx on public.past_roles (user_id);
+create index if not exists past_roles_pending_idx on public.past_roles (association_id) where status = 'pending';
+alter table public.past_roles enable row level security;
+
+/** Regional leaders of the association (campus and regional positions) and admins (any). Never your own. */
+create or replace function public.can_review_past_role(p_level text, p_association_id smallint, p_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select p_user is distinct from auth.uid() and (
+    public.is_admin()
+    or (p_level in ('institutional', 'regional') and public.has_role('regional', p_association_id))
+  );
+$$;
+revoke all on function public.can_review_past_role(text, smallint, uuid) from public;
+grant execute on function public.can_review_past_role(text, smallint, uuid) to authenticated;
+
+drop policy if exists "Read past leadership" on public.past_roles;
+create policy "Read past leadership" on public.past_roles for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or public.is_admin()
+    or public.can_review_past_role(level, association_id, user_id)
+    -- any active leader can see confirmed history (to find experienced alumni)
+    or (status = 'confirmed' and exists (
+          select 1 from public.leader_roles r
+           where r.user_id = (select auth.uid()) and r.status = 'approved'
+             and (r.term_ends_on is null or r.term_ends_on >= public.kenya_today())))
+  );
+-- all writes go through the functions below
+revoke insert, update, delete on public.past_roles from authenticated, anon;
+grant select on public.past_roles to authenticated;
+
+-- ---------- Add / remove / show publicly (the member) ---------------------------------------
+create or replace function public.add_past_role(
+  p_level text, p_institution_id bigint, p_association_id smallint, p_position text,
+  p_from integer, p_to integer, p_show_publicly boolean default false
+) returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_assoc smallint := p_association_id;
+  v_id uuid;
+begin
+  if not public.is_member() then
+    raise exception 'Complete your profile first.' using errcode = '42501';
+  end if;
+  if public.i_am_declined() then
+    raise exception 'A leader could not confirm your membership, so you can''t do this. Contact MSAK through Help & feedback.' using errcode = '42501';
+  end if;
+  if p_level not in ('institutional', 'regional', 'national') then
+    raise exception 'Choose campus, regional or national.' using errcode = '22023';
+  end if;
+  if p_level = 'institutional' then
+    v_assoc := public.institution_association_id(p_institution_id);
+    if v_assoc is null then
+      raise exception 'Choose the institution.' using errcode = '22023';
+    end if;
+  elsif p_level = 'regional' and v_assoc is null then
+    raise exception 'Choose the association.' using errcode = '22023';
+  end if;
+  if p_from is null or p_to is null or p_to < p_from then
+    raise exception 'The end year must be the same as or after the start year.' using errcode = '22023';
+  end if;
+  if p_to - p_from > 10 then
+    raise exception 'A single position can cover at most 10 years; add separate entries.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_position, ''))) not between 2 and 100 then
+    raise exception 'Enter the position (2–100 characters).' using errcode = '22023';
+  end if;
+  if p_to > extract(year from public.kenya_today())::integer then
+    raise exception 'Past positions must have ended by this year.' using errcode = '22023';
+  end if;
+  if (select count(*) from public.past_roles where user_id = v_uid) >= 20 then
+    raise exception 'You can add up to 20 past positions.' using errcode = '22023';
+  end if;
+  insert into public.past_roles (user_id, level, association_id, institution_id, position, from_year, to_year, show_publicly)
+  values (
+    v_uid, p_level,
+    case when p_level = 'national' then null else v_assoc end,
+    case when p_level = 'institutional' then p_institution_id else null end,
+    btrim(p_position), p_from, p_to, coalesce(p_show_publicly, false)
+  )
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function public.remove_past_role(p_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.past_roles where id = p_id and (user_id = auth.uid() or public.is_admin());
+  if not found then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+create or replace function public.set_past_role_public(p_id uuid, p_show boolean)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  update public.past_roles set show_publicly = coalesce(p_show, false) where id = p_id and user_id = auth.uid();
+  if not found then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+-- ---------- Confirm / decline (regional leaders, admins) ------------------------------------
+create or replace function public.review_past_role(p_id uuid, p_confirm boolean, p_note text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  r public.past_roles;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  select * into r from public.past_roles where id = p_id for update;
+  if not found then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+  if not public.can_review_past_role(r.level, r.association_id, r.user_id) then
+    raise exception 'You are not allowed to confirm this.' using errcode = '42501';
+  end if;
+  if not p_confirm and coalesce(char_length(v_note), 0) < 3 then
+    raise exception 'Say briefly why you are declining (at least 3 characters).' using errcode = '22023';
+  end if;
+  update public.past_roles
+     set status = case when p_confirm then 'confirmed' else 'declined' end,
+         reviewed_by = auth.uid(), reviewed_at = now(), review_note = left(v_note, 300)
+   where id = p_id;
+end;
+$$;
+
+revoke all on function public.add_past_role(text, bigint, smallint, text, integer, integer, boolean) from public, anon;
+revoke all on function public.remove_past_role(uuid) from public, anon;
+revoke all on function public.set_past_role_public(uuid, boolean) from public, anon;
+revoke all on function public.review_past_role(uuid, boolean, text) from public, anon;
+grant execute on function public.add_past_role(text, bigint, smallint, text, integer, integer, boolean) to authenticated;
+grant execute on function public.remove_past_role(uuid) to authenticated;
+grant execute on function public.set_past_role_public(uuid, boolean) to authenticated;
+grant execute on function public.review_past_role(uuid, boolean, text) to authenticated;
+
+-- ---------- Public honour roll ----------------------------------------------------------------
+-- Confirmed national and regional positions of people who agreed to be listed. Names and positions only.
+create or replace function public.public_past_leaders()
+returns table (full_name text, level text, association_code text, association_name text, title text, from_year integer, to_year integer)
+language sql stable security definer set search_path = '' as $$
+  select p.full_name, r.level, a.code, a.name, r.position, r.from_year, r.to_year
+    from public.past_roles r
+    join public.profiles p on p.id = r.user_id
+    left join public.associations a on a.id = r.association_id
+   where r.status = 'confirmed' and r.show_publicly and r.level in ('national', 'regional')
+   order by r.to_year desc, r.from_year desc, (r.level = 'national') desc, a.code, p.full_name;
+$$;
+grant execute on function public.public_past_leaders() to anon, authenticated;
+
+-- ---------- Activity log ----------------------------------------------------------------------
+drop trigger if exists audit_past_roles on public.past_roles;
+create trigger audit_past_roles after insert or update or delete on public.past_roles
+  for each row execute function public.audit_row();
+
+-- =====================================================================
+-- 16 · Edit / withdraw leadership requests (same as 13_edit_leadership_requests.sql)
+-- =====================================================================
+-- - A leader request that is still waiting: change the position title, or withdraw it.
+--   (Changing the level means withdrawing and requesting again: a different person approves each level.)
+-- - A past leadership entry: edit any detail; it goes back to "waiting for confirmation".
+-- Safe to run more than once.
+
+create or replace function public.update_leader_request(p_role_id uuid, p_position text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_pos text := btrim(coalesce(p_position, ''));
+begin
+  if length(v_pos) not between 2 and 100 then
+    raise exception 'Enter your position (2–100 characters).' using errcode = '22023';
+  end if;
+  update public.leader_roles
+     set position = v_pos, requested_at = now()
+   where id = p_role_id and user_id = auth.uid() and status = 'pending';
+  if not found then
+    raise exception 'Only your own requests that are still waiting can be changed.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+create or replace function public.withdraw_leader_request(p_role_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.leader_roles where id = p_role_id and user_id = auth.uid() and status = 'pending';
+  if not found then
+    raise exception 'Only your own requests that are still waiting can be withdrawn.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+create or replace function public.update_past_role(
+  p_id uuid, p_level text, p_institution_id bigint, p_association_id smallint, p_position text,
+  p_from integer, p_to integer
+) returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_assoc smallint := p_association_id;
+begin
+  if not exists (select 1 from public.past_roles where id = p_id and user_id = auth.uid()) then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+  if p_level not in ('institutional', 'regional', 'national') then
+    raise exception 'Choose campus, regional or national.' using errcode = '22023';
+  end if;
+  if p_level = 'institutional' then
+    v_assoc := public.institution_association_id(p_institution_id);
+    if v_assoc is null then
+      raise exception 'Choose the institution.' using errcode = '22023';
+    end if;
+  elsif p_level = 'regional' and v_assoc is null then
+    raise exception 'Choose the association.' using errcode = '22023';
+  end if;
+  if p_from is null or p_to is null or p_to < p_from then
+    raise exception 'The end year must be the same as or after the start year.' using errcode = '22023';
+  end if;
+  if p_to - p_from > 10 then
+    raise exception 'A single position can cover at most 10 years; add separate entries.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_position, ''))) not between 2 and 100 then
+    raise exception 'Enter the position (2–100 characters).' using errcode = '22023';
+  end if;
+  if p_to > extract(year from public.kenya_today())::integer then
+    raise exception 'Past positions must have ended by this year.' using errcode = '22023';
+  end if;
+  update public.past_roles
+     set level = p_level,
+         association_id = case when p_level = 'national' then null else v_assoc end,
+         institution_id = case when p_level = 'institutional' then p_institution_id else null end,
+         position = btrim(p_position),
+         from_year = p_from, to_year = p_to,
+         show_publicly = case when p_level = 'institutional' then false else show_publicly end,
+         status = 'pending', reviewed_by = null, reviewed_at = null, review_note = null  -- checked again
+   where id = p_id and user_id = auth.uid();
+end;
+$$;
+
+revoke all on function public.update_leader_request(uuid, text) from public, anon;
+revoke all on function public.withdraw_leader_request(uuid) from public, anon;
+revoke all on function public.update_past_role(uuid, text, bigint, smallint, text, integer, integer) from public, anon;
+grant execute on function public.update_leader_request(uuid, text) to authenticated;
+grant execute on function public.withdraw_leader_request(uuid) to authenticated;
+grant execute on function public.update_past_role(uuid, text, bigint, smallint, text, integer, integer) to authenticated;
+
+-- =====================================================================
+-- 17 · Administrators can edit and delete everything (same as 14_admin_full_control.sql)
+-- =====================================================================
+-- Members' profiles (every field, confirmation status), member accounts, current leader roles (assign directly,
+-- edit position/scope/term, delete), anyone's past leadership, announcements, documents, feedback messages and
+-- church reports. Everything is recorded in the Activity log. Only administrators can use these.
+-- Safe to run more than once.
+
+-- ---------- Members ---------------------------------------------------------------------------
+-- An admin changing someone's institution doesn't send them back to "waiting" (the admin vouches for them).
+create or replace function public.profiles_reverify_on_move()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.institution_id is distinct from old.institution_id and new.verification <> 'pending' and not public.is_admin() then
+    new.verification := 'pending';
+    new.verified_at := null;
+    new.verified_by := null;
+    new.verification_note := null;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.admin_update_profile(
+  p_member uuid, p_full_name text, p_gender text, p_phone text, p_institution_id bigint, p_course text,
+  p_admission_year integer, p_year_of_study integer, p_expected_completion_year integer, p_verification text
+) returns void language plpgsql security definer set search_path = '' as $$
+declare
+  old public.profiles;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  select * into old from public.profiles where id = p_member for update;
+  if not found then
+    raise exception 'Member not found.' using errcode = 'P0002';
+  end if;
+  if p_verification not in ('pending', 'verified', 'declined') then
+    raise exception 'Choose waiting, confirmed or declined.' using errcode = '22023';
+  end if;
+  if p_verification = 'declined' and exists (
+       select 1 from public.leader_roles r where r.user_id = p_member and r.status = 'approved'
+         and (r.term_ends_on is null or r.term_ends_on >= public.kenya_today())) then
+    raise exception 'This member holds an active leader role. Revoke the role first.' using errcode = '42501';
+  end if;
+  update public.profiles
+     set full_name = btrim(p_full_name), gender = p_gender, phone = btrim(p_phone), institution_id = p_institution_id,
+         course = btrim(p_course), admission_year = p_admission_year, year_of_study = p_year_of_study,
+         expected_completion_year = p_expected_completion_year,
+         verification = p_verification,
+         verified_by = case when p_verification is distinct from old.verification then auth.uid() else verified_by end,
+         verified_at = case when p_verification is distinct from old.verification then now() else verified_at end,
+         verification_note = case when p_verification is distinct from old.verification then
+                               case when p_verification = 'declined' then 'Set by an administrator' else null end
+                             else verification_note end
+   where id = p_member;
+end;
+$$;
+
+-- Any member account (not administrators): deletes the login and profile; posts and churches stay without the name.
+create or replace function public.admin_delete_member(p_member uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  if p_member = auth.uid() or exists (select 1 from public.admins a where a.user_id = p_member) then
+    raise exception 'Administrator accounts cannot be removed here.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.profiles where id = p_member) then
+    raise exception 'Member not found.' using errcode = 'P0002';
+  end if;
+  delete from public.profiles where id = p_member;
+  delete from auth.users where id = p_member;
+end;
+$$;
+
+-- ---------- Current leader roles --------------------------------------------------------------
+create or replace function public.admin_assign_role(
+  p_member uuid, p_level text, p_position text, p_association_id smallint, p_institution_id bigint, p_term_ends_on date default null
+) returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_assoc smallint := p_association_id;
+  v_id uuid;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.profiles where id = p_member) then
+    raise exception 'Member not found.' using errcode = 'P0002';
+  end if;
+  if p_level = 'institutional' then
+    v_assoc := public.institution_association_id(p_institution_id);
+    if v_assoc is null then raise exception 'Choose the institution.' using errcode = '22023'; end if;
+  elsif p_level = 'regional' and v_assoc is null then
+    raise exception 'Choose the association.' using errcode = '22023';
+  elsif p_level not in ('institutional', 'regional', 'national') then
+    raise exception 'Choose campus, regional or national.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_position, ''))) not between 2 and 100 then
+    raise exception 'Enter the position (2–100 characters).' using errcode = '22023';
+  end if;
+  insert into public.leader_roles (user_id, level, position, association_id, institution_id, status, reviewed_by, reviewed_at, term_ends_on, review_note)
+  values (
+    p_member, p_level, btrim(p_position),
+    case when p_level = 'national' then null else v_assoc end,
+    case when p_level = 'institutional' then p_institution_id else null end,
+    'approved', auth.uid(), now(),
+    coalesce(p_term_ends_on, public.academic_year_end(public.kenya_today() + 30)),
+    'Assigned by an administrator'
+  ) returning id into v_id;
+  update public.profiles set verification = 'verified', verified_by = auth.uid(), verified_at = now(), verification_note = null
+   where id = p_member and verification <> 'verified';
+  return v_id;
+end;
+$$;
+
+create or replace function public.admin_update_role(
+  p_role_id uuid, p_level text, p_position text, p_association_id smallint, p_institution_id bigint,
+  p_status text, p_term_ends_on date
+) returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_assoc smallint := p_association_id;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  if p_level = 'institutional' then
+    v_assoc := public.institution_association_id(p_institution_id);
+    if v_assoc is null then raise exception 'Choose the institution.' using errcode = '22023'; end if;
+  elsif p_level = 'regional' and v_assoc is null then
+    raise exception 'Choose the association.' using errcode = '22023';
+  elsif p_level not in ('institutional', 'regional', 'national') then
+    raise exception 'Choose campus, regional or national.' using errcode = '22023';
+  end if;
+  if p_status not in ('pending', 'approved', 'rejected', 'revoked') then
+    raise exception 'Choose a valid status.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_position, ''))) not between 2 and 100 then
+    raise exception 'Enter the position (2–100 characters).' using errcode = '22023';
+  end if;
+  update public.leader_roles
+     set level = p_level, position = btrim(p_position),
+         association_id = case when p_level = 'national' then null else v_assoc end,
+         institution_id = case when p_level = 'institutional' then p_institution_id else null end,
+         status = p_status,
+         term_ends_on = case when p_status = 'approved'
+                             then coalesce(p_term_ends_on, term_ends_on, public.academic_year_end(public.kenya_today() + 30))
+                             else p_term_ends_on end,
+         renewal_requested_at = case when p_status = 'approved' then renewal_requested_at else null end,
+         reviewed_by = auth.uid(), reviewed_at = now()
+   where id = p_role_id;
+  if not found then
+    raise exception 'That role was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+create or replace function public.admin_delete_role(p_role_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  delete from public.leader_roles where id = p_role_id;
+  if not found then
+    raise exception 'That role was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+-- ---------- Past leadership (anyone's) --------------------------------------------------------
+create or replace function public.admin_update_past_role(
+  p_id uuid, p_level text, p_institution_id bigint, p_association_id smallint, p_position text,
+  p_from integer, p_to integer, p_status text, p_show_publicly boolean
+) returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_assoc smallint := p_association_id;
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  if p_level = 'institutional' then
+    v_assoc := public.institution_association_id(p_institution_id);
+    if v_assoc is null then raise exception 'Choose the institution.' using errcode = '22023'; end if;
+  elsif p_level = 'regional' and v_assoc is null then
+    raise exception 'Choose the association.' using errcode = '22023';
+  elsif p_level not in ('institutional', 'regional', 'national') then
+    raise exception 'Choose campus, regional or national.' using errcode = '22023';
+  end if;
+  if p_status not in ('pending', 'confirmed', 'declined') then
+    raise exception 'Choose a valid status.' using errcode = '22023';
+  end if;
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 10 then
+    raise exception 'Check the years (end on or after start, at most 10 years).' using errcode = '22023';
+  end if;
+  update public.past_roles
+     set level = p_level,
+         association_id = case when p_level = 'national' then null else v_assoc end,
+         institution_id = case when p_level = 'institutional' then p_institution_id else null end,
+         position = btrim(p_position), from_year = p_from, to_year = p_to,
+         status = p_status, show_publicly = coalesce(p_show_publicly, false) and p_level <> 'institutional',
+         reviewed_by = auth.uid(), reviewed_at = now()
+   where id = p_id;
+  if not found then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
+revoke all on function public.admin_update_profile(uuid, text, text, text, bigint, text, integer, integer, integer, text) from public, anon;
+revoke all on function public.admin_delete_member(uuid) from public, anon;
+revoke all on function public.admin_assign_role(uuid, text, text, smallint, bigint, date) from public, anon;
+revoke all on function public.admin_update_role(uuid, text, text, smallint, bigint, text, date) from public, anon;
+revoke all on function public.admin_delete_role(uuid) from public, anon;
+revoke all on function public.admin_update_past_role(uuid, text, bigint, smallint, text, integer, integer, text, boolean) from public, anon;
+grant execute on function public.admin_update_profile(uuid, text, text, text, bigint, text, integer, integer, integer, text) to authenticated;
+grant execute on function public.admin_delete_member(uuid) to authenticated;
+grant execute on function public.admin_assign_role(uuid, text, text, smallint, bigint, date) to authenticated;
+grant execute on function public.admin_update_role(uuid, text, text, smallint, bigint, text, date) to authenticated;
+grant execute on function public.admin_delete_role(uuid) to authenticated;
+grant execute on function public.admin_update_past_role(uuid, text, bigint, smallint, text, integer, integer, text, boolean) to authenticated;
+
+-- ---------- Announcements, documents, feedback, church reports ---------------------------------
+drop policy if exists "Admins edit announcements" on public.announcements;
+create policy "Admins edit announcements" on public.announcements for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+grant update (title, body) on public.announcements to authenticated;
+
+grant update (title, description) on public.documents to authenticated;  -- "Admins manage documents" policy covers it
+
+drop policy if exists "Admins delete feedback" on public.feedback;
+create policy "Admins delete feedback" on public.feedback for delete to authenticated using (public.is_admin());
+grant delete on public.feedback to authenticated;
+
+drop policy if exists "Admins delete church reports" on public.church_reports;
+create policy "Admins delete church reports" on public.church_reports for delete to authenticated using (public.is_admin());
+grant delete on public.church_reports to authenticated;
+
+-- Activity log for the tables that didn't have it yet
+drop trigger if exists audit_feedback on public.feedback;
+create trigger audit_feedback after delete on public.feedback for each row execute function public.audit_row();
+drop trigger if exists audit_counties on public.counties;
+create trigger audit_counties after insert or update or delete on public.counties for each row execute function public.audit_row();
+drop trigger if exists audit_associations on public.associations;
+create trigger audit_associations after insert or update or delete on public.associations for each row execute function public.audit_row();
+
+-- Log every profile change (admins can now edit names, phones, courses…)
+drop trigger if exists audit_profiles_upd on public.profiles;
+create trigger audit_profiles_upd after update of full_name, gender, phone, institution_id, course, admission_year, year_of_study,
+  expected_completion_year, verification on public.profiles
+  for each row execute function public.audit_row();
+
+-- =====================================================================
+-- 18 · Past leaders page visibility (same as 15_past_leaders_visibility.sql)
+-- =====================================================================
+-- - Per entry: "hidden by admin" overrides the member's own "show me publicly" choice.
+-- - Whole page: a site setting turns the public Past leaders page off and on.
+-- Safe to run more than once.
+
+alter table public.past_roles add column if not exists hidden_by_admin boolean not null default false;
+
+create table if not exists public.site_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.site_settings enable row level security;
+drop policy if exists "Settings are public" on public.site_settings;
+create policy "Settings are public" on public.site_settings for select to anon, authenticated using (true);
+drop policy if exists "Admins change settings" on public.site_settings;
+create policy "Admins change settings" on public.site_settings for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+grant select on public.site_settings to anon, authenticated;
+grant insert, update, delete on public.site_settings to authenticated;
+insert into public.site_settings (key, value) values ('past_leaders_public', 'true'::jsonb) on conflict (key) do nothing;
+
+drop trigger if exists audit_site_settings on public.site_settings;
+create trigger audit_site_settings after insert or update or delete on public.site_settings
+  for each row execute function public.audit_row();
+
+create or replace function public.admin_hide_past_role(p_id uuid, p_hidden boolean)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only administrators can do this.' using errcode = '42501';
+  end if;
+  update public.past_roles set hidden_by_admin = coalesce(p_hidden, false) where id = p_id;
+  if not found then
+    raise exception 'That entry was not found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+revoke all on function public.admin_hide_past_role(uuid, boolean) from public, anon;
+grant execute on function public.admin_hide_past_role(uuid, boolean) to authenticated;
+
+-- The public list: nothing while the page is switched off; never entries an admin has hidden.
+create or replace function public.public_past_leaders()
+returns table (full_name text, level text, association_code text, association_name text, title text, from_year integer, to_year integer)
+language sql stable security definer set search_path = '' as $$
+  select p.full_name, r.level, a.code, a.name, r.position, r.from_year, r.to_year
+    from public.past_roles r
+    join public.profiles p on p.id = r.user_id
+    left join public.associations a on a.id = r.association_id
+   where r.status = 'confirmed' and r.show_publicly and not r.hidden_by_admin and r.level in ('national', 'regional')
+     and coalesce((select s.value = 'true'::jsonb from public.site_settings s where s.key = 'past_leaders_public'), true)
+   order by r.to_year desc, r.from_year desc, (r.level = 'national') desc, a.code, p.full_name;
+$$;
+grant execute on function public.public_past_leaders() to anon, authenticated;
+
+
+-- =====================================================================
+-- 19 · Profile photos (same as 16_profile_photos.sql)
+-- =====================================================================
+alter table public.profiles add column if not exists photo_path text
+  check (photo_path is null or photo_path ~ '^[0-9a-f-]{36}/[A-Za-z0-9._-]{1,80}$');
+
+grant update (photo_path) on public.profiles to authenticated;   -- "Update own profile" policy limits it to yourself
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('profile-photos', 'profile-photos', true, 524288, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+  set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Own profile photos: see" on storage.objects;
+create policy "Own profile photos: see" on storage.objects for select to authenticated
+  using (bucket_id = 'profile-photos' and ((storage.foldername(name))[1] = (select auth.uid())::text or public.is_admin()));
+
+drop policy if exists "Own profile photos: upload" on storage.objects;
+create policy "Own profile photos: upload" on storage.objects for insert to authenticated
+  with check (bucket_id = 'profile-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "Own profile photos: delete" on storage.objects;
+create policy "Own profile photos: delete" on storage.objects for delete to authenticated
+  using (bucket_id = 'profile-photos' and ((storage.foldername(name))[1] = (select auth.uid())::text or public.is_admin()));
+

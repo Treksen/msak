@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { Check, MailCheck } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { makeLookup } from "../../lib/directory";
 import type { Gender, LeaderLevel } from "../../lib/types";
-import { Alert, SelectInput, Spinner, TextInput } from "../../components/ui";
+import { Alert, Modal, SelectInput, Spinner, TextInput } from "../../components/ui";
+import { policies } from "../../lib/policies";
+import { PolicySections } from "./Policies";
 import { useSeo } from "../../lib/seo";
+import { checkEmail } from "../../lib/emailCheck";
 
 type Form = {
   full_name: string;
   email: string;
+  confirm_email: string;
   password: string;
   confirm: string;
   phone: string;
@@ -21,6 +25,8 @@ type Form = {
   course: string;
   admission_year: string;
   year_of_study: string;
+  /** Graduated already: registering as alumni. */
+  completed: boolean;
   expected_completion_year: string;
   leader_level: LeaderLevel | "";
   leader_position: string;
@@ -30,6 +36,43 @@ type Form = {
 const steps = ["Your account", "Your campus", "Leadership", "Confirm"];
 const thisYear = new Date().getFullYear();
 
+const blank: Form = {
+  full_name: "",
+  email: "",
+  confirm_email: "",
+  password: "",
+  confirm: "",
+  phone: "",
+  gender: "",
+  association_id: "",
+  county_id: "",
+  institution_id: "",
+  course: "",
+  admission_year: String(thisYear),
+  year_of_study: "1",
+  completed: false,
+  expected_completion_year: String(thisYear + 4),
+  leader_level: "",
+  leader_position: "",
+  accept: false,
+};
+
+/** Opens a policy in a pop-up so the form stays filled in. */
+function PolicyLink({ slug, onOpen, children }: { slug: string; onOpen: (slug: string) => void; children: ReactNode }) {
+  return (
+    <a
+      href={`/policies/${slug}`}
+      onClick={(e) => {
+        e.preventDefault();
+        onOpen(slug);
+      }}
+      className="font-semibold"
+    >
+      {children}
+    </a>
+  );
+}
+
 export function RegisterPage() {
   const { me, directory } = useAuth();
   const navigate = useNavigate();
@@ -38,25 +81,19 @@ export function RegisterPage() {
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [checkEmail, setCheckEmail] = useState<string | null>(null);
-  const [f, setF] = useState<Form>({
-    full_name: "",
-    email: "",
-    password: "",
-    confirm: "",
-    phone: "",
-    gender: "",
-    association_id: "",
-    county_id: "",
-    institution_id: "",
-    course: "",
-    admission_year: String(thisYear),
-    year_of_study: "1",
-    expected_completion_year: String(thisYear + 4),
-    leader_level: "",
-    leader_position: "",
-    accept: false,
-  });
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  /** The member said "No, mine is correct" for this exact address. */
+  const [keptEmail, setKeptEmail] = useState<string | null>(null);
+  const [reading, setReading] = useState<string | null>(null);
+  // Nothing is saved: refreshing or leaving the page starts the form again. (Policies open in a pop-up, so reading them keeps it.)
+  const [f, setF] = useState<Form>(blank);
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem("msak-register-draft"); // clear drafts saved by the earlier version
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useSeo({
     title: "Become a member",
@@ -64,8 +101,8 @@ export function RegisterPage() {
     path: "/register",
   });
   useEffect(() => {
-    if (me && !checkEmail) navigate("/app", { replace: true });
-  }, [me, checkEmail, navigate]);
+    if (me && !sentTo) navigate("/app", { replace: true });
+  }, [me, sentTo, navigate]);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => {
     setF((prev) => ({ ...prev, [k]: v }));
@@ -79,7 +116,10 @@ export function RegisterPage() {
     const e: Partial<Record<keyof Form, string>> = {};
     if (i === 0) {
       if (f.full_name.trim().length < 2) e.full_name = "Enter your full name.";
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) e.email = "Enter a valid email address.";
+      const mail = checkEmail(f.email);
+      if (!mail.ok) e.email = mail.error;
+      else if (mail.suggestion && keptEmail !== f.email.trim()) e.email = `Check your email: did you mean ${mail.suggestion}?`;
+      if (mail.ok && f.confirm_email.trim().toLowerCase() !== f.email.trim().toLowerCase()) e.confirm_email = "The two email addresses don't match.";
       if (f.password.length < 8) e.password = "Use at least 8 characters.";
       if (f.confirm !== f.password) e.confirm = "The passwords don't match.";
       const digits = f.phone.replace(/\D/g, "");
@@ -95,8 +135,10 @@ export function RegisterPage() {
       const yos = Number(f.year_of_study);
       const done = Number(f.expected_completion_year);
       if (!(adm >= 1990 && adm <= thisYear + 1)) e.admission_year = `Between 1990 and ${thisYear + 1}.`;
-      if (!(yos >= 1 && yos <= 10)) e.year_of_study = "Between 1 and 10.";
+      if (!f.completed && !(yos >= 1 && yos <= 10)) e.year_of_study = "Between 1 and 10.";
       if (!(done >= adm && done <= adm + 12)) e.expected_completion_year = "Must be after your admission year.";
+      else if (f.completed && done > thisYear) e.expected_completion_year = `If you've completed your studies, this is ${thisYear} or earlier.`;
+      else if (!f.completed && done < thisYear) e.expected_completion_year = "That's in the past — choose “I've completed my studies” above if you've graduated.";
     }
     if (i === 2 && f.leader_level && f.leader_position.trim().length < 2) e.leader_position = "Enter your position, e.g. Chairperson.";
     if (i === 3 && !f.accept) e.accept = "Please accept the terms to continue.";
@@ -104,11 +146,16 @@ export function RegisterPage() {
     return Object.keys(e).length === 0;
   }
 
+  // alumni see three steps (no Leadership); step 3 (Confirm) shows as the third
+  const shownSteps = f.completed ? steps.filter((x) => x !== "Leadership") : steps;
+  const pos = f.completed && step === 3 ? 2 : step;
+
   function next(e: FormEvent) {
     e.preventDefault();
     if (!validate(step)) return;
     if (step < steps.length - 1) {
-      setStep(step + 1);
+      // alumni skip the Leadership step: they join as members and add past positions later
+      setStep(step === 1 && f.completed ? 3 : step + 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -128,12 +175,15 @@ export function RegisterPage() {
         institution_id: Number(f.institution_id),
         course: f.course.trim(),
         admission_year: Number(f.admission_year),
-        year_of_study: Number(f.year_of_study),
+        // alumni: their final year of study
+        year_of_study: f.completed
+          ? Math.min(10, Math.max(1, Number(f.expected_completion_year) - Number(f.admission_year) || 1))
+          : Number(f.year_of_study),
         expected_completion_year: Number(f.expected_completion_year),
-        leader_level: f.leader_level || null,
-        leader_position: f.leader_level ? f.leader_position.trim() : null,
+        leader_level: (!f.completed && f.leader_level) || null,
+        leader_position: !f.completed && f.leader_level ? f.leader_position.trim() : null,
       });
-      if (res.needsConfirmation) setCheckEmail(f.email.trim());
+      if (res.needsConfirmation) setSentTo(f.email.trim());
       else navigate("/app", { replace: true });
     } catch (err) {
       setSubmitError(errorMessage(err));
@@ -142,13 +192,13 @@ export function RegisterPage() {
     }
   }
 
-  if (checkEmail) {
+  if (sentTo) {
     return (
       <div className="container-page flex max-w-xl flex-col items-start gap-4 py-20">
         <MailCheck className="size-12 text-gold-700" aria-hidden="true" />
         <h1 className="font-serif text-4xl font-semibold text-navy-900">Check your email</h1>
         <p className="text-[17px] leading-relaxed text-body">
-          We sent a confirmation link to <strong>{checkEmail}</strong>. Open it on this device to activate your account, then log in.
+          We sent a confirmation link to <strong>{sentTo}</strong>. Open it on this device to activate your account, then log in.
         </p>
         <Link to="/login" className="btn btn-primary">
           Go to login
@@ -170,12 +220,12 @@ export function RegisterPage() {
         Already a member? <Link to="/login">Log in</Link>.
       </p>
 
-      <ol className="mt-8 grid grid-cols-4 gap-2" aria-label="Registration steps">
-        {steps.map((s, i) => (
-          <li key={s} className="flex flex-col gap-2" aria-current={i === step ? "step" : undefined}>
-            <span className={`h-1 rounded-full ${i <= step ? "bg-navy-900" : "bg-line"}`} />
-            <span className={`text-xs sm:text-[13px] ${i === step ? "font-bold text-navy-900" : "text-muted"}`}>
-              {i < step && <Check className="mr-1 inline size-3.5" aria-hidden="true" />}
+      <ol className={`mt-8 grid gap-2 ${f.completed ? "grid-cols-3" : "grid-cols-4"}`} aria-label="Registration steps">
+        {shownSteps.map((s, i) => (
+          <li key={s} className="flex flex-col gap-2" aria-current={i === pos ? "step" : undefined}>
+            <span className={`h-1 rounded-full ${i <= pos ? "bg-navy-900" : "bg-line"}`} />
+            <span className={`text-xs sm:text-[13px] ${i === pos ? "font-bold text-navy-900" : "text-muted"}`}>
+              {i < pos && <Check className="mr-1 inline size-3.5" aria-hidden="true" />}
               {s}
             </span>
           </li>
@@ -184,7 +234,7 @@ export function RegisterPage() {
 
       <form onSubmit={next} noValidate className="card mt-6 flex flex-col gap-5 p-5 sm:p-8">
         <h2 className="font-serif text-2xl font-semibold text-navy-900">
-          {step + 1}. {steps[step]}
+          {pos + 1}. {steps[step]}
         </h2>
 
         {step === 0 && (
@@ -193,7 +243,69 @@ export function RegisterPage() {
               <TextInput label="Full name" value={f.full_name} onChange={(e) => set("full_name", e.target.value)} error={errors.full_name} autoComplete="name" />
             </div>
             <div className="sm:col-span-2">
-              <TextInput label="Email" type="email" value={f.email} onChange={(e) => set("email", e.target.value)} error={errors.email} autoComplete="email" />
+              <TextInput
+                label="Email"
+                type="email"
+                inputMode="email"
+                value={f.email}
+                onChange={(e) => set("email", e.target.value)}
+                error={errors.email}
+                autoComplete="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                hint="Use an address you check — it's how you reset your password."
+              />
+              {(() => {
+                const mail = checkEmail(f.email);
+                if (!f.email.includes("@") || !mail.ok || !mail.suggestion || keptEmail === f.email.trim()) return null;
+                const fixed = mail.suggestion;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-gold-50 px-3 py-2 text-sm text-navy-900" role="status">
+                    <span>
+                      Did you mean <strong className="break-all">{fixed}</strong>?
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        setF((prev) => ({
+                          ...prev,
+                          email: fixed,
+                          confirm_email: prev.confirm_email.trim().toLowerCase() === prev.email.trim().toLowerCase() ? fixed : prev.confirm_email,
+                        }));
+                        setErrors((prev) => ({ ...prev, email: undefined, confirm_email: undefined }));
+                      }}
+                    >
+                      Yes, use this
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setKeptEmail(f.email.trim());
+                        setErrors((prev) => ({ ...prev, email: undefined }));
+                      }}
+                    >
+                      No, mine is correct
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="sm:col-span-2">
+              <TextInput
+                label="Confirm email"
+                type="email"
+                inputMode="email"
+                value={f.confirm_email}
+                onChange={(e) => set("confirm_email", e.target.value)}
+                onPaste={(e) => e.preventDefault()}
+                error={errors.confirm_email}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                hint="Type it again (not pasted) to catch mistakes."
+              />
             </div>
             <TextInput label="Password" type="password" value={f.password} onChange={(e) => set("password", e.target.value)} error={errors.password} autoComplete="new-password" hint="At least 8 characters." />
             <TextInput label="Confirm password" type="password" value={f.confirm} onChange={(e) => set("confirm", e.target.value)} error={errors.confirm} autoComplete="new-password" />
@@ -266,6 +378,38 @@ export function RegisterPage() {
                 </option>
               ))}
             </SelectInput>
+            <fieldset className="sm:col-span-2">
+              <legend className="field-label">Are you still studying?</legend>
+              <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    [false, "I'm still studying"],
+                    [true, "I've completed my studies (alumni)"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label
+                    key={label}
+                    className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-3 text-sm font-semibold ${
+                      f.completed === value ? "border-navy-900 bg-navy-900/5 text-navy-900" : "border-line text-body"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="completed"
+                      className="size-4 accent-[#0B1F4D]"
+                      checked={f.completed === value}
+                      onChange={() => {
+                        set("completed", value);
+                        setErrors((prev) => ({ ...prev, expected_completion_year: undefined, year_of_study: undefined }));
+                        if (value && Number(f.expected_completion_year) > thisYear) set("expected_completion_year", String(thisYear - 1));
+                        if (!value && Number(f.expected_completion_year) < thisYear) set("expected_completion_year", String(thisYear + 1));
+                      }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             <div className="sm:col-span-2">
               <TextInput label="Course" value={f.course} onChange={(e) => set("course", e.target.value)} error={errors.course} placeholder="e.g. BSc Computer Science" />
             </div>
@@ -277,24 +421,30 @@ export function RegisterPage() {
               onChange={(e) => set("admission_year", e.target.value)}
               error={errors.admission_year}
             />
+            {!f.completed && (
+              <TextInput
+                label="Current year of study"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10}
+                value={f.year_of_study}
+                onChange={(e) => set("year_of_study", e.target.value)}
+                error={errors.year_of_study}
+              />
+            )}
             <TextInput
-              label="Current year of study"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={10}
-              value={f.year_of_study}
-              onChange={(e) => set("year_of_study", e.target.value)}
-              error={errors.year_of_study}
-            />
-            <TextInput
-              label="Expected completion year"
+              label={f.completed ? "Year you completed" : "Expected completion year"}
               type="number"
               inputMode="numeric"
               value={f.expected_completion_year}
               onChange={(e) => set("expected_completion_year", e.target.value)}
               error={errors.expected_completion_year}
-              hint="Used to welcome you into the alumni community later."
+              hint={
+                f.completed
+                  ? "You'll join as alumni. After signing up you can add any leadership positions you held."
+                  : "Used to welcome you into the alumni community later."
+              }
             />
           </div>
         )}
@@ -352,26 +502,28 @@ export function RegisterPage() {
               <dd className="font-semibold">{lookup.placeLabel(Number(f.institution_id))}</dd>
               <dt className="text-muted">Course</dt>
               <dd className="font-semibold">
-                {f.course} · Year {f.year_of_study} · completing {f.expected_completion_year}
+                {f.completed ? `${f.course} · completed ${f.expected_completion_year} (alumni)` : `${f.course} · Year ${f.year_of_study} · completing ${f.expected_completion_year}`}
               </dd>
               <dt className="text-muted">Leadership</dt>
-              <dd className="font-semibold">{f.leader_level ? `${f.leader_position} (${f.leader_level}) — to be verified` : "Member"}</dd>
+              <dd className="font-semibold">
+                {f.completed ? "Alumni member" : f.leader_level ? `${f.leader_position} (${f.leader_level}) — to be verified` : "Member"}
+              </dd>
             </dl>
             <label className="flex items-start gap-3 text-sm leading-relaxed">
               <input type="checkbox" className="mt-0.5 size-5 accent-[#0B1F4D]" checked={f.accept} onChange={(e) => set("accept", e.target.checked)} />
               <span>
                 I agree to the{" "}
-                <Link to="/policies/terms" target="_blank">
+                <PolicyLink slug="terms" onOpen={setReading}>
                   Terms
-                </Link>
+                </PolicyLink>
                 ,{" "}
-                <Link to="/policies/privacy" target="_blank">
+                <PolicyLink slug="privacy" onOpen={setReading}>
                   Privacy Policy
-                </Link>{" "}
+                </PolicyLink>{" "}
                 and{" "}
-                <Link to="/policies/community" target="_blank">
+                <PolicyLink slug="community" onOpen={setReading}>
                   Community Standards
-                </Link>
+                </PolicyLink>
                 .
               </span>
             </label>
@@ -383,7 +535,7 @@ export function RegisterPage() {
 
         <div className="flex justify-between gap-2 border-t border-line pt-5">
           {step > 0 ? (
-            <button type="button" className="btn btn-outline" onClick={() => setStep(step - 1)} disabled={busy}>
+            <button type="button" className="btn btn-outline" onClick={() => setStep(step === 3 && f.completed ? 1 : step - 1)} disabled={busy}>
               Back
             </button>
           ) : (
@@ -394,6 +546,21 @@ export function RegisterPage() {
           </button>
         </div>
       </form>
+
+      {/* Policies open over the form, so nothing typed is lost */}
+      <Modal open={!!reading} wide title={reading && policies[reading] ? policies[reading].title : "Policy"} onClose={() => setReading(null)}>
+        {reading && policies[reading] && (
+          <div className="max-h-[65vh] overflow-y-auto pr-1">
+            <p className="text-sm text-muted">{policies[reading].description}</p>
+            <PolicySections doc={policies[reading]} compact />
+            <div className="sticky bottom-0 mt-6 flex justify-end bg-white pt-3">
+              <button type="button" className="btn btn-primary" onClick={() => setReading(null)}>
+                Back to registration
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

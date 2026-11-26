@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Navigate, useSearchParams } from "react-router";
+import { Trash2 } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { usePortal } from "../../lib/portal";
 import type { AuditEntry, ErrorEntry } from "../../lib/types";
 import { Alert, EmptyState, PageHeader, Spinner } from "../../components/ui";
 
+export const ActivityLogPage = () => <AdminLogsPage tab="activity" />;
+export const ErrorLogPage = () => <AdminLogsPage tab="errors" />;
+
+/** Links from before the logs had their own addresses. */
+export function OldLogsRedirect() {
+  const [params] = useSearchParams();
+  return <Navigate to={params.get("tab") === "errors" ? "/app/admin/errors" : "/app/admin/activity"} replace />;
+}
+
 /** Admin only: what people changed in the portal, and errors the app hit on people's devices. */
-export function AdminLogsPage() {
+function AdminLogsPage({ tab }: { tab: "activity" | "errors" }) {
   const { perms } = usePortal();
-  const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "errors" ? "errors" : "activity";
 
   useEffect(() => {
     document.title = `${tab === "errors" ? "Error log" : "Activity log"} — MSAK`;
@@ -20,33 +27,9 @@ export function AdminLogsPage() {
 
   return (
     <div>
-      <Link to="/app/admin" className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-navy-700 no-underline">
-        <ArrowLeft className="size-4" aria-hidden="true" />
-        Administration
-      </Link>
-      <PageHeader eyebrow="Administrators only" title="Activity & error logs">
+      <PageHeader eyebrow="Administrators only" title={tab === "errors" ? "Error log" : "Activity log"}>
         Members and leaders never see these pages. Entries are kept until you clear them.
       </PageHeader>
-
-      <div role="tablist" aria-label="Log" className="mb-5 flex flex-wrap gap-1 rounded-md bg-[#f1eee5] p-1 sm:inline-flex">
-        {(
-          [
-            ["activity", "Activity"],
-            ["errors", "App errors"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setParams(id === "errors" ? { tab: "errors" } : {}, { replace: true })}
-            className={`rounded px-3.5 py-2 text-sm font-semibold ${tab === id ? "bg-white text-navy-900 shadow-sm" : "text-muted"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
 
       {tab === "activity" ? <ActivityLog /> : <ErrorLog />}
       <PurgeLogs />
